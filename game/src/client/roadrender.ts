@@ -11,8 +11,10 @@ import type { Builder } from "./world";
 
 type BuilderFor = (x: number, z: number) => Builder;
 
-const ROAD_Y = 0.03;
-const PATH_Y = 0.15; // kerb height ~12 cm above the road
+/** Road surface height (m). The physics reads these too, so the wheels meet what's drawn. */
+export const ROAD_Y = 0.03;
+/** Footpath top: a kerb about 12 cm above the road. */
+export const PATH_Y = 0.15;
 const PAINT = 0.008;
 const ASPHALT = 0x85868a;
 const PATH = 0xaeaba4;

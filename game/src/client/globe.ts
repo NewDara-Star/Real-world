@@ -60,12 +60,47 @@ const load = (url: string, srgb = true) =>
       res(t);
     }, undefined, rej),
   );
-const [day, night, water, stars] = await Promise.all([
+const [day, night, water] = await Promise.all([
   load("/globe/earth-blue-marble.jpg"),
   load("/globe/earth-night.jpg"),
   load("/globe/earth-water.png", false),
-  load("/globe/night-sky.png"),
 ]);
+const stars = starField();
+
+/**
+ * The night sky, drawn here rather than shipped as an image (so there's no
+ * licence to track): stars with a realistic spread of brightness (many faint,
+ * few bright), a little colour, and a faint band where the Milky Way would be.
+ */
+function starField() {
+  const w = 4096, h = 2048;
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  const g = c.getContext("2d")!;
+  g.fillStyle = "#000";
+  g.fillRect(0, 0, w, h);
+  let seed = 7;
+  const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let i = 0; i < 9000; i++) {
+    // Uniform on the sphere: equirectangular rows thin out toward the poles.
+    const x = rand() * w;
+    const y = (Math.acos(1 - 2 * rand()) / Math.PI) * h;
+    // Brightness falls off like real star counts: mostly faint.
+    const b = Math.pow(rand(), 6);
+    const band = Math.exp(-(((y / h - 0.5 - 0.18 * Math.sin((x / w) * Math.PI * 2)) / 0.08) ** 2));
+    const a = Math.min(1, 0.15 + b * 1.2 + band * 0.15 * rand());
+    const tint = rand();
+    g.fillStyle = tint < 0.15 ? `rgba(170,190,255,${a})` : tint > 0.9 ? `rgba(255,220,180,${a})` : `rgba(255,255,255,${a})`;
+    const r = 0.5 + b * 1.6;
+    g.beginPath();
+    g.arc(x, y, r, 0, Math.PI * 2);
+    g.fill();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
 
 // ---- sun ----
 const sun = new THREE.DirectionalLight(0xffffff, 3.4);

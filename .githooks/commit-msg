@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# A commit that changes the app, its tests or the pipeline needs a Story:
+# paragraph: what the driver does, what they expect, what they'll actually get.
+set -euo pipefail
+source "$(dirname "$0")/lib.sh"
+
+msg_file="$1"
+staged="$(git diff --cached --name-only)"
+grep -qE "$CODE_RE" <<<"$staged" || exit 0
+if ! grep -qE '^Story:' "$msg_file"; then
+  fail "This commit changes the app but its message has no Story: paragraph." \
+    "Add a paragraph starting 'Story:' telling it from the driver's side: what they do," \
+    "what they expect, and what they'll actually see or feel now (and anything untested)."
+fi
+exit 0

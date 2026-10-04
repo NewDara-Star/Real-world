@@ -24,6 +24,14 @@ export interface CarSpec {
   suspensionTravel: number; // maximum spring length (m)
   antiRoll: [number, number]; // N/m of compression difference
   maxSteer: number; // road-wheel angle at full lock (rad)
+  /** Steering ratio: steering-wheel angle / road-wheel angle. Sets the wheel's rotation range. */
+  steerRatio: number;
+  /** Which axle the engine drives. */
+  drive: "front" | "rear";
+  /** Full-throttle torque curve: [rpm, N m] points, linear between, zero past the last. */
+  torque: [number, number][];
+  /** Torque at the driven wheels (total, N m) that rolls an automatic at walking pace. */
+  creepTorque: number;
   mu: number; // tyre friction coefficient (dry)
   brakeTorque: [number, number]; // per wheel at full pedal, front/rear (N m)
   handbrakeTorque: number; // per rear wheel
@@ -54,6 +62,11 @@ export const HATCH_AUTO: CarSpec = {
   suspensionTravel: 0.36,
   antiRoll: [9000, 5000],
   maxSteer: 0.56,
+  steerRatio: 14,
+  drive: "front",
+  // 1.0 TSI 110: 200 N m from 2,000 to 3,500 rpm, then power-limited at 81 kW.
+  torque: [[800, 110], [1000, 110], [2000, 200], [3500, 200], [4500, 172], [5500, 141], [6200, 125], [6300, 0]],
+  creepTorque: 220,
   mu: 1.0,
   brakeTorque: [1800, 650],
   handbrakeTorque: 1400,
@@ -73,13 +86,59 @@ function magic(s: number, B: number, C: number, E: number): number {
   return Math.sin(C * Math.atan(bs - E * (bs - Math.atan(bs))));
 }
 
-/** 1.0 TSI 110 torque curve (N m). */
-function engineTorque(rpm: number): number {
-  if (rpm < 1000) return 110;
-  if (rpm < 2000) return 110 + (rpm - 1000) * 0.09;
-  if (rpm <= 3500) return 200;
-  if (rpm >= 6300) return 0;
-  return Math.min(200, 81000 / ((rpm * Math.PI) / 30)); // power-limited
+/**
+ * A Lagos danfo: an old long-wheelbase Toyota HiAce-class minibus (2.8 l
+ * diesel, rear-wheel drive) with a load of passengers. Driven as an automatic.
+ */
+export const DANFO: CarSpec = {
+  mass: 2300,
+  cgToFront: 1.25,
+  cgToRear: 1.55,
+  track: 1.6,
+  cgHeight: 0.8,
+  inertia: [1400, 4200, 4000],
+  wheelRadius: 0.33,
+  wheelInertia: 1.6,
+  springRate: [42000, 52000],
+  damping: [3000, 3400],
+  suspensionTravel: 0.36,
+  antiRoll: [11000, 4000],
+  maxSteer: 0.6,
+  // A real minibus is slower (about 18:1), but the G29 turns 900 degrees at
+  // most, so 13:1 keeps the wheel 1:1 with the van's full lock.
+  steerRatio: 13,
+  drive: "rear",
+  torque: [[750, 120], [1000, 130], [2400, 186], [3600, 170], [4200, 140], [4400, 0]],
+  creepTorque: 600,
+  mu: 0.9,
+  brakeTorque: [2600, 1300],
+  handbrakeTorque: 1800,
+  ratios: [4.31, 2.33, 1.44, 1.0, 0.84],
+  reverse: 4.22,
+  finalDrive: 4.3,
+  idleRpm: 750,
+  redline: 4200,
+  cdA: 1.9,
+  crr: 0.015,
+  half: [0.95, 0.95, 2.35],
+};
+
+/** Steering-wheel angle from centre to full lock (rad): what the wheel's range must match. */
+export const rimLock = (s: CarSpec) => s.maxSteer * s.steerRatio;
+/** The wheel's rotation range lock to lock (degrees), for setting a G29 to match the car. */
+export const wheelRangeDeg = (s: CarSpec) => (rimLock(s) * 2 * 180) / Math.PI;
+
+/** Engine torque at full throttle (N m), from the spec's curve. */
+function engineTorque(s: CarSpec, rpm: number): number {
+  const t = s.torque;
+  if (rpm <= t[0][0]) return t[0][1];
+  for (let i = 1; i < t.length; i++) {
+    if (rpm <= t[i][0]) {
+      const [r0, q0] = t[i - 1], [r1, q1] = t[i];
+      return q0 + ((q1 - q0) * (rpm - r0)) / (r1 - r0);
+    }
+  }
+  return 0;
 }
 
 interface Wheel {
@@ -180,7 +239,7 @@ export class CarPhysics {
     ].map(([wx, wz, front]) => ({
       local: { x: wx as number, y: mountY(front as boolean), z: wz as number },
       front: front as boolean,
-      driven: front as boolean, // front-wheel drive
+      driven: (front as boolean) === (s.drive === "front"),
       omega: 0,
       len: s.suspensionTravel,
       kappa: 0,
@@ -413,11 +472,11 @@ export class CarPhysics {
     if (ratio !== 0) {
       // Torque dips briefly while the clutches hand over during a shift.
       const handover = this.shiftTimer > 0.2 ? 0.4 : 1;
-      const tq = engineTorque(this.rpm) * inp.throttle * this.tcs * handover;
+      const tq = engineTorque(s, this.rpm) * inp.throttle * this.tcs * handover;
       driveTorque = (tq * ratio * s.finalDrive * 0.92) / 2;
       // Creep: a dual-clutch box slips its clutch to roll the car at walking pace.
       const vf = this.localVelocity().vf * Math.sign(ratio);
-      if (inp.throttle < 0.05 && inp.brake < 0.05 && vf < 1.8) driveTorque += Math.sign(ratio) * 110 * (1 - Math.max(0, vf) / 1.8);
+      if (inp.throttle < 0.05 && inp.brake < 0.05 && vf < 1.8) driveTorque += Math.sign(ratio) * (s.creepTorque / 2) * (1 - Math.max(0, vf) / 1.8);
       // Engine braking off throttle.
       if (inp.throttle < 0.05 && vf > 2) driveTorque -= Math.sign(ratio) * 18 * Math.abs(ratio) * s.finalDrive / 2 * (this.rpm / 3000);
     }
@@ -536,9 +595,9 @@ export class CarPhysics {
     const sp = Math.hypot(v.x, v.z);
     const drag = 0.5 * 1.225 * s.cdA * sp;
     body.applyImpulse({ x: -v.x * drag * h, y: 0, z: -v.z * drag * h }, true);
-    // Lateral force pushes the tyres back toward straight ahead; through a
-    // 14:1 rack that's this torque at the rim.
-    this.steerTorque = rackTorque / 14;
+    // Lateral force pushes the tyres back toward straight ahead; through the
+    // steering ratio that's this torque at the rim.
+    this.steerTorque = rackTorque / s.steerRatio;
   }
 
   private currentRatio(sel: string) {
@@ -557,8 +616,9 @@ export class CarPhysics {
     // Shift decisions follow road speed, so a moment of wheelspin can't trigger an upshift.
     const roadRpm = Math.abs((this.localVelocity().vf / s.wheelRadius) * ratio * s.finalDrive) * (30 / Math.PI);
     // Below ~1,300 rpm the clutch slips (pulling away), letting the engine rev.
-    const slipRpm = s.idleRpm + inp.throttle * 1800;
-    const target = ratio === 0 ? s.idleRpm + inp.throttle * (s.redline - s.idleRpm) * 0.85 : Math.max(coupled, coupled < 1300 ? slipRpm : s.idleRpm);
+    const span = s.redline - s.idleRpm;
+    const slipRpm = s.idleRpm + inp.throttle * span * 0.33;
+    const target = ratio === 0 ? s.idleRpm + inp.throttle * span * 0.85 : Math.max(coupled, coupled < s.idleRpm + span * 0.093 ? slipRpm : s.idleRpm);
     this.rpm += (Math.min(s.redline, target) - this.rpm) * Math.min(1, dt * 12);
     if (inp.selector !== "D") {
       this.gear = 1;
@@ -567,8 +627,9 @@ export class CarPhysics {
     this.shiftTimer -= dt;
     if (this.shiftTimer > 0) return;
     // Light throttle shifts early (economy), full throttle holds to near the redline.
-    const up = 1750 + inp.throttle ** 1.5 * 4000;
-    const down = 1100 + inp.throttle ** 1.5 * 2200;
+    // (For the Polo: up at 1,750 rpm gently, 5,750 flat out; down at 1,100 / 3,300.)
+    const up = s.idleRpm + span * (0.176 + 0.74 * inp.throttle ** 1.5);
+    const down = s.idleRpm + span * (0.056 + 0.407 * inp.throttle ** 1.5);
     if (roadRpm > up && this.gear < s.ratios.length) {
       this.gear++;
       this.shiftTimer = 0.35;

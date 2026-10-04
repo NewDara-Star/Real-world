@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Before every commit: credits for new assets, no personal data or keys, and
+# (when code changed) the typecheck and tests. See CLAUDE.md, "Hooks".
+set -euo pipefail
+source "$(dirname "$0")/lib.sh"
+
+staged="$(git diff --cached --name-only --diff-filter=ACMR)"
+[ -z "$staged" ] && exit 0
+
+# 1. Licences: a new or changed asset must be named in its folder's CREDITS.md (as staged).
+missing=()
+while IFS= read -r f; do
+  case "$f" in
+    game/public/tex/*|game/public/models/*|game/public/globe/*)
+      dir="$(echo "$f" | cut -d/ -f1-3)"
+      name="$(echo "$f" | cut -d/ -f4)"
+      [ "$name" = "CREDITS.md" ] || [ "$name" = "manifest.json" ] && continue
+      stem="${name%.*}"
+      credits="$(git show ":$dir/CREDITS.md" 2>/dev/null || true)"
+      if ! grep -qF "$stem" <<<"$credits"; then missing+=("$f → add it to $dir/CREDITS.md (source, author, licence)"); fi
+      ;;
+  esac
+done <<<"$staged"
+[ ${#missing[@]} -eq 0 ] || fail "New assets without a credit (CC0/CC-BY/MIT only, credited):" "${missing[@]}"
+
+# 2. Privacy and secrets in the added lines. Allowed addresses: commit attribution and example.com.
+added="$(git diff --cached -U0 --no-color -- . ':(exclude)*.lock' ':(exclude)*package-lock.json' | grep -E '^\+[^+]' || true)"
+emails="$(grep -oE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' <<<"$added" | grep -viE '^(noreply@anthropic\.com|[^@]+@example\.(com|org))$' | grep -vE '@[23]x\.' | sort -u || true)"
+[ -z "$emails" ] || fail "Personal email address in the change (never commit personal data):" $emails
+if grep -qE 'MLY\|[0-9a-f]{10,}|sk-ant-[A-Za-z0-9_-]{10,}|ghp_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----' <<<"$added"; then
+  fail "Something that looks like an API key or token is in the change." "Keys live in environment variables (e.g. MAPILLARY_TOKEN), never in the repo."
+fi
+
+# 3. Code changed: typecheck and tests must pass.
+if grep -qE "$CODE_RE" <<<"$staged"; then
+  run_checks "$(git write-tree)"
+fi
+exit 0

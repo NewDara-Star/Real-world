@@ -15,7 +15,7 @@ import { Examiner, type Fault } from "./rules";
 import { Navigator } from "./nav";
 import { MapView } from "./map";
 import { preloadCarModel } from "./carmodel";
-import { initPhysics } from "./carphysics";
+import { initPhysics, physicsReady, wheelRangeDeg } from "./carphysics";
 import { texturesEnabled } from "./textures";
 import { World, type Place } from "./world";
 import { FLAG_DANFO, FLAG_DRIVING, FLAG_MOVING, FLAG_RUNNING, type MoveState, type PlayerInfo } from "../shared/protocol";
@@ -551,7 +551,10 @@ const maxAvatars = isTouch ? 14 : 30;
 
 function frame(now: number) {
   requestAnimationFrame(frame);
-  const dt = Math.min(0.1, (now - last) / 1000);
+  // The simulation steps at most 0.1 s a frame; the fps meter needs the real
+  // time, or a slow machine reads as 10 fps when it's really at 3.
+  const realDt = (now - last) / 1000;
+  const dt = Math.min(0.1, realDt);
   last = now;
   if (!world.meta) return;
   pollPauseButton();
@@ -644,8 +647,11 @@ function frame(now: number) {
     $("clock").textContent = `${gameHours >= 6.5 && gameHours < 18.75 ? "☀️" : "🌙"} ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
   }
 
-  fpsFrames++;
-  fpsTime += dt;
+  // A gap over a second is the window being hidden or a load, not slowness.
+  if (realDt < 1) {
+    fpsFrames++;
+    fpsTime += realDt;
+  }
   if (fpsTime >= 3) {
     fps = fpsFrames / fpsTime;
     adaptQuality(fps);
@@ -712,7 +718,13 @@ function enterVehicle(kind: VehicleKind) {
     toast("No road near here. Walk to a street first 🛣️");
     return;
   }
-  car = new PlayerVehicle(kind, spot.x, spot.z, spot.yaw, CITY.drive);
+  if (!physicsReady()) {
+    toast("Still loading the car physics, try again in a second");
+    return;
+  }
+  car = new PlayerVehicle(kind, spot.x, spot.z, spot.yaw, world, CITY.drive);
+  // The wheel turns as far as this vehicle's steering wheel does, lock to lock.
+  void g29.setRange(wheelRangeDeg(car.spec.physics));
   if (DEBUG) Object.assign(window, { __car: car, __drive: drive, __mirrors: mirrors, __renderer: gfx.renderer });
   scene.add(car.root);
   me.avatar.root.visible = false;
@@ -822,8 +834,8 @@ function driveFrame(dt: number, now: number) {
     for (const o of [c.spec.length / 2 - r, -(c.spec.length / 2 - r)]) {
       const hit = traffic.collide(c.x + fx * o, c.z + fz * o, r);
       if (hit) {
-        // With the rigid-body car the physics engine already handled a car-on-car hit.
-        if (!c.phys || hit.kind !== "car") c.bump(hit.nx, hit.nz, hit.depth);
+        // Vehicles are solid in the physics world already; people aren't.
+        if (hit.kind === "person") c.hitPerson();
         hitKind = hit.kind;
       }
     }
@@ -839,21 +851,14 @@ function driveFrame(dt: number, now: number) {
     ffbJolt *= Math.pow(0.002, dt);
     if (c.kerbJolt) ffbJolt = c.kerbJolt;
     const dir = ffb.invert ? -1 : 1;
-    if (c.phys) {
-      // Like sim racing: the force is the front tyres' aligning torque at the
-      // steering rack (averaged over the frame's physics steps). The wheel's
-      // own centring spring is off so it can't fight that, and the wheel's
-      // firmware damper keeps the loop from oscillating, firmer when slow.
-      void g29.setSpring(0);
-      void g29.setDamper(0.13 + 0.2 * Math.max(0, 1 - c.speed / 8));
-      const align = c.phys.steerTorque * 0.045;
-      void g29.setForce(dir * minForce(ffb.gain * (align + ffbJolt)));
-    } else {
-      // Older car model: speed-scaled centring spring, plus crash jolts.
-      void g29.setDamper(0.13);
-      void g29.setSpring(Math.min(0.85, 0.12 + c.speed / 30) * (1 - c.slip * 0.6) * Math.min(1, ffb.gain));
-      void g29.setForce(dir * minForce(ffb.gain * ffbJolt));
-    }
+    // Like sim racing: the force is the front tyres' aligning torque at the
+    // steering rack (averaged over the frame's physics steps). The wheel's own
+    // centring spring is off so it can't fight that, and the wheel's firmware
+    // damper keeps the loop from oscillating, firmer when slow.
+    void g29.setSpring(0);
+    void g29.setDamper(0.13 + 0.2 * Math.max(0, 1 - c.speed / 8));
+    const align = c.phys.steerTorque * 0.045;
+    void g29.setForce(dir * minForce(ffb.gain * (align + ffbJolt)));
     void g29.setRevLights(c.rpm > 0.35 ? (c.rpm - 0.35) / 0.6 : 0);
   }
   if (inp.horn && hornCooldown <= 0) {
@@ -1066,6 +1071,8 @@ function updateWheelMon(dt: number) {
 g29.onChange = (on) => {
   refreshWheelButton();
   if (on) openWheelMon(true);
+  // Plugged in mid-drive: match the wheel's range to this vehicle's steering.
+  if (on && car) void g29.setRange(wheelRangeDeg(car.spec.physics));
   if (on) toast("Wheel connected 🎮 Paddles: gear · L2/R2: indicators · L3: lights · R3: wipers · Share: hazards · ✕: parking brake · clutch pedal: handbrake · hold d-pad ◀ ▶ to check over your shoulder, ▲ to glance at the passenger mirror");
 };
 void g29.restore().then(refreshWheelButton);

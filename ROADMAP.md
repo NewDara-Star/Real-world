@@ -24,7 +24,11 @@ physics and the driver. `research/15-what-it-takes.md` is the full map.
    between frames (research 11 §6).
 3. **Road data for Finglas** from OSM (Overpass): lane counts, turn lanes,
    roundabouts and mini-roundabouts, speed limits. Our Overture network has
-   none of these (research 13).
+   none of these (research 13). With it, Irish open records (research 17,
+   CC BY): Tailte Éireann buildings, GSI lidar heights per building, Dublin
+   City Council lamps, trees and signal sites (to check SUMO's signals).
+   data.gov.ie is blocked from the cloud sandbox, so those downloads run on
+   the owner's Mac.
 4. **Examiner to the full RSA sheet:** 18 headings, tolerances and minimum
    durations, the real fail rule, an end-of-test report, then the three
    manoeuvres (reverse round a corner, turnabout, hill start) and a mock test
@@ -32,12 +36,17 @@ physics and the driver. `research/15-what-it-takes.md` is the full map.
 5. **Sound:** engine from recorded rpm loops (on/off load), road and wind
    noise, tyre squeal from slip against the grip peak.
 6. **Physics next:** kerb faces, surface grip (grass, wet), ESC, pad/keyboard
-   yaw help (off for the wheel), the danfo on the new model.
-7. **Elevation:** open lidar terrain for hills (needed for the hill start).
+   yaw help (off for the wheel).
+7. **Elevation:** open lidar terrain for hills (needed for the hill start); one
+   height grid that roads, paint and the physics all read, with a test on real
+   Finglas data (the Tokyo approach, research 16).
 8. **Live weather** from Open-Meteo: rain, wet roads, fog; wet grip in the tyres.
 9. **NPC traffic:** real trips, IDM/MOBIL calibrated to highD/NGSIM, brake
    lights and indicators, cyclists, parked cars, buses (Dublin Bus model from
-   `docs/blender-assets.md`).
+   `docs/blender-assets.md`). Lane changes limited by forward speed (no
+   sliding sideways when stopped; research 17). Spawns weighted by road class,
+   later by Dublin's junction counts; a driver profile per place (assertive
+   share, gap acceptance, junction blocking), which Lagos needs (research 18).
 10. **Pedestrians:** social force model, trips, crossings, animated models.
 
 ## Next: look (Teleoperator, djentic and Mars GT teardowns, `research/06-…`, `07-…`)
@@ -53,9 +62,13 @@ physics and the driver. `research/15-what-it-takes.md` is the full map.
    drives real 3D porches, eaves and window reveals; interior-mapped windows;
    weathering. Mapillary photos where coverage exists (needs `MAPILLARY_TOKEN`).
 14. Road shader: wear, patches, cracks, worn paint, wetness, reflections.
+    Windows: a whole number of bays per wall (ours wrap round corners), rooms
+    behind the glass, night windows switching on and off; carry Overture's
+    building class, floors and facade colour through the bake (research 16).
 15. Street furniture density from Overture/OSM (4,363 street lamps, bins, bus
     stops, post boxes), trees with wind, front garden walls and hedges.
-16. Night: real lamp light spread, wet-road light streaks.
+16. Night: a top-down light map for street lamps and every car's headlights
+    (overlaps take the brighter, not the sum; research 16), wet-road streaks.
 
 ## Then
 
@@ -64,6 +77,10 @@ physics and the driver. `research/15-what-it-takes.md` is the full map.
 
 ## Done
 
+- Checks and hooks: `npm run check` (typecheck + pass/fail tests for physics,
+  force feedback, traffic, examiner, credits and privacy); git hooks for
+  credits, privacy, Story: paragraphs and a second-Claude review on push
+- The danfo on the real physics (HiAce-class spec); the old bicycle model deleted
 - Research 09–15: how real sims are built; the feel fixes from it (FFB
   pacing, damper, fixed-step physics, sprung head, FOV setting)
 - Car physics: Rapier rigid body, raycast suspension, Pacejka tyres, DSG

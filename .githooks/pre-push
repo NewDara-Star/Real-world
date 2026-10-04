@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Before every push: the checks on what's being pushed, then a second Claude
+# reviews the commits against CLAUDE.md (.githooks/review.sh).
+set -euo pipefail
+source "$(dirname "$0")/lib.sh"
+
+remote="$1"
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "0000000000000000000000000000000000000000" ] && continue # deleting a branch
+  if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+    base="$(git merge-base "$local_sha" "$remote/main" 2>/dev/null || git rev-list --max-parents=0 "$local_sha" | tail -1)"
+  else
+    base="$remote_sha"
+  fi
+  changed="$(git diff --name-only "$base" "$local_sha")"
+  [ -z "$changed" ] && continue
+  if grep -qE "$CODE_RE" <<<"$changed"; then
+    [ "$(git rev-parse "$local_sha^{tree}")" = "$(git rev-parse HEAD^{tree})" ] || fail "Push what's checked out: $local_ref isn't HEAD." "Check out the branch you're pushing first."
+    if ! git diff --quiet || ! git diff --cached --quiet; then
+      fail "Uncommitted changes would make the checks test something other than what's pushed." "Commit or stash them first."
+    fi
+    run_checks "$(git rev-parse "$local_sha^{tree}")"
+  fi
+  "$(dirname "$0")/review.sh" "$base" "$local_sha"
+done
+exit 0
