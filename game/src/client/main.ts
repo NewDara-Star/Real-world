@@ -14,6 +14,7 @@ import { ALLOW_CAR, ALLOW_SERVICE, LaneKind } from "./roadnet";
 import { Examiner, type Fault } from "./rules";
 import { Navigator } from "./nav";
 import { MapView } from "./map";
+import { preloadCarModel } from "./carmodel";
 import { World, type Place } from "./world";
 import { FLAG_DANFO, FLAG_DRIVING, FLAG_MOVING, FLAG_RUNNING, type MoveState, type PlayerInfo } from "../shared/protocol";
 import { PlayerVehicle, type VehicleKind } from "./drive";
@@ -216,6 +217,7 @@ if (SOLO) {
   for (const el of document.querySelectorAll<HTMLElement>(".join-box label")) el.style.display = "none";
 }
 const enterBtn = $<HTMLButtonElement>("enter");
+void preloadCarModel();
 
 world
   .load(ZONE, (p) => (enterBtn.textContent = `Loading ${CITY.label}… ${Math.round(p * 100)}%`))

@@ -4,6 +4,11 @@ import { templateGeometry, makeTemplate } from "./props";
 import { carTemplate, danfoTemplate } from "./traffic";
 import type { DriveInput } from "./wheel";
 import { mirrors, type MirrorKind } from "./mirrors";
+import { buildCarModel, type CarModel } from "./carmodel";
+
+const AXIS_X = new THREE.Vector3(1, 0, 0);
+const AXIS_Y = new THREE.Vector3(0, 1, 0);
+const AXIS_Z = new THREE.Vector3(0, 0, 1);
 import type { World } from "./world";
 
 // Arcade-sim car physics tuned to feel good on a wheel: a bicycle model with
@@ -85,6 +90,11 @@ export class PlayerVehicle {
   private wiperPause = 0;
   private wiperArms: THREE.Object3D[] = [];
   private lamps: Record<"indL" | "indR" | "brake" | "head" | "reverse", THREE.MeshBasicNodeMaterial>;
+  private model: CarModel | null = null;
+  private steerBase: THREE.Quaternion | null = null;
+  private wheelSpin = 0;
+  private tmpQ = new THREE.Quaternion();
+  private tmpQ2 = new THREE.Quaternion();
   /** Events for the frame, for sounds: flasher relay and wiper end-of-sweep. */
   ticked: boolean | null = null;
   wiped = false;
@@ -98,14 +108,23 @@ export class PlayerVehicle {
     const base = SPECS[kind];
     // Mirror the cockpit for right-hand-drive cars.
     this.spec = { ...base, cockpit: base.cockpit.clone().setX(base.cockpit.x * this.seat) };
+    // The real car model, when loaded: its own body, interior and driver's eye.
+    this.model = kind === "car" ? buildCarModel(this.seat) : null;
+    if (this.model) {
+      this.spec = { ...this.spec, cockpit: this.model.eye.clone(), length: Math.min(4.6, this.model.length), width: 2.0 };
+      this.steerBase = this.model.steering?.quaternion.clone() ?? null;
+    }
     this.x = x;
     this.z = z;
     this.yaw = yaw;
     const mat = createVertexColorMaterial(0.55, 0.15);
     this.body = new THREE.Group();
-    const bodyMesh = new THREE.Mesh(templateGeometry(kind === "danfo" ? danfoTemplate() : carTemplate(0x1f9d55)), mat);
-    bodyMesh.castShadow = true;
-    this.body.add(bodyMesh);
+    if (this.model) this.body.add(this.model.root);
+    else {
+      const bodyMesh = new THREE.Mesh(templateGeometry(kind === "danfo" ? danfoTemplate() : carTemplate(0x1f9d55)), mat);
+      bodyMesh.castShadow = true;
+      this.body.add(bodyMesh);
+    }
     this.root.add(this.body);
 
     // Minimal interior for the cockpit camera: dashboard and a steering wheel
@@ -113,7 +132,8 @@ export class PlayerVehicle {
     this.cockpitGroup = new THREE.Group();
     const c = this.spec.cockpit;
     const dash = makeTemplate([[new THREE.BoxGeometry(this.spec.width - 0.2, 0.22, 0.45).translate(0, c.y - 0.55, c.z + 0.95), 0x2a2522]]);
-    this.cockpitGroup.add(new THREE.Mesh(templateGeometry(dash), mat));
+    const dashMesh = new THREE.Mesh(templateGeometry(dash), mat);
+    this.cockpitGroup.add(dashMesh);
     const wheelGeo = templateGeometry(
       makeTemplate([
         [new THREE.TorusGeometry(0.19, 0.025, 6, 18), 0x1a1a1a],
@@ -125,6 +145,8 @@ export class PlayerVehicle {
     this.steeringWheel.position.set(c.x, c.y - 0.42, c.z + 0.68);
     this.steeringWheel.rotation.x = -0.45;
     this.cockpitGroup.add(this.steeringWheel);
+    // The real model brings its own dashboard and wheel.
+    dashMesh.visible = this.steeringWheel.visible = !this.model;
     this.buildCabin(mat);
     // The interior is for the driver's eyes only: the mirror camera (layer 0)
     // looks straight through it, like real mirrors outside the cabin.
@@ -161,7 +183,7 @@ export class PlayerVehicle {
       [new THREE.BoxGeometry(0.06, 0.5, 1.9).translate(-half - 0.02, c.y - 0.68, c.z + 0.1), 0x3a3633],
       [new THREE.BoxGeometry(0.06, 0.5, 1.9).translate(half + 0.02, c.y - 0.68, c.z + 0.1), 0x3a3633],
     ];
-    this.cockpitGroup.add(new THREE.Mesh(templateGeometry(makeTemplate(parts)), mat));
+    if (!this.model) this.cockpitGroup.add(new THREE.Mesh(templateGeometry(makeTemplate(parts)), mat));
 
     // Mirrors: glass sampling the shared rear view, in a dark housing, each
     // turned to face the driver's eye.
@@ -183,10 +205,18 @@ export class PlayerVehicle {
     };
     // Rear-view hangs off the glass about 60 cm ahead of the eyes; wing
     // mirrors sit outside, just behind the A-pillar so the side window shows them.
-    mirror("rear", 0, c.y + 0.12, c.z + 0.62, 0.25, 0.07);
-    const wx = half + 0.16, wy = c.y - 0.3, wz = c.z + 0.8;
-    mirror("left", wx, wy, wz, 0.21, 0.13);
-    mirror("right", -wx, wy, wz, 0.21, 0.13);
+    if (this.model) {
+      // Glass on the back faces of the car's own mirror housings.
+      const m = this.model;
+      mirror("rear", 0, c.y + 0.13, c.z + 0.6, 0.24, 0.065);
+      mirror("left", m.mirrorL.x - 0.02, m.mirrorL.y, m.mirrorL.z - 0.125, 0.19, 0.07);
+      mirror("right", m.mirrorR.x + 0.02, m.mirrorR.y, m.mirrorR.z - 0.125, 0.19, 0.07);
+    } else {
+      mirror("rear", 0, c.y + 0.12, c.z + 0.62, 0.25, 0.07);
+      const wx = half + 0.16, wy = c.y - 0.3, wz = c.z + 0.8;
+      mirror("left", wx, wy, wz, 0.21, 0.13);
+      mirror("right", -wx, wy, wz, 0.21, 0.13);
+    }
 
     // Wipers: a frame lying in the glass plane, arms pivoting within it.
     const glass = new THREE.Group();
@@ -198,7 +228,7 @@ export class PlayerVehicle {
         [new THREE.BoxGeometry(0.5, 0.028, 0.012).translate(0.36, 0.012, -0.012), 0x0c0c0c],
       ]),
     );
-    for (const x of [-0.62, 0.02]) {
+    for (const x of this.model ? [] : [-0.62, 0.02]) {
       const arm = new THREE.Mesh(blade, mat);
       arm.position.set(x * (w / 1.8), 0, 0);
       glass.add(arm);
@@ -210,12 +240,14 @@ export class PlayerVehicle {
   /** Indicator, brake, reverse and head lamps on the body, lit by colour. */
   private buildLamps() {
     // Just proud of the body box (car 4.2 m, danfo 4.6 m long).
-    const L = (this.kind === "danfo" ? 2.3 : 2.1) + 0.03;
+    const L = this.model ? this.model.length / 2 - 0.02 : (this.kind === "danfo" ? 2.3 : 2.1) + 0.03;
     const W = this.spec.width / 2;
-    const y = this.kind === "danfo" ? 0.75 : 0.62;
+    const y = this.model ? 0.72 : this.kind === "danfo" ? 0.75 : 0.62;
     const mk = () => new THREE.MeshBasicNodeMaterial({ color: 0x000000 });
     const lamps = { indL: mk(), indR: mk(), brake: mk(), head: mk(), reverse: mk() };
     const add = (m: THREE.MeshBasicNodeMaterial, x: number, z: number, sw = 0.22, sh = 0.1) => {
+      // The real car model lights its own lamps; indicators still need a blinking point each side.
+      if (this.model && m !== lamps.indL && m !== lamps.indR) return;
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(sw, sh, 0.05), m);
       mesh.position.set(x, y, z);
       this.body.add(mesh);
@@ -313,6 +345,20 @@ export class PlayerVehicle {
     this.lamps.reverse.color.setRGB(rev ? 3 : 0.5, rev ? 3 : 0.5, rev ? 3 : 0.5);
     const hb = this.lights === 2 ? 5 : this.lights ? 3 : 0.6;
     this.lamps.head.color.setRGB(hb, hb, hb * 0.92);
+    if (this.model) {
+      const glow = (mats: THREE.Material[], r: number, g: number, b: number, k: number) => {
+        for (const m of mats) {
+          const sm = m as THREE.MeshStandardMaterial;
+          if (sm.emissive) {
+            sm.emissive.setRGB(r, g, b);
+            sm.emissiveIntensity = k;
+          }
+        }
+      };
+      glow(this.model.lamps.brake, 1, 0.05, 0.03, braking ? 6 : this.lights ? 1.5 : 0);
+      glow(this.model.lamps.head, 1, 0.97, 0.9, this.lights === 2 ? 6 : this.lights ? 3.5 : 0);
+      glow(this.model.lamps.indL, 1, 0.45, 0.02, left || right ? 5 : 0);
+    }
   }
 
   private setIndicator(v: number) {
@@ -334,7 +380,11 @@ export class PlayerVehicle {
 
   setCockpit(on: boolean) {
     this.cockpitGroup.visible = on;
-    this.body.visible = !on;
+    if (this.model) {
+      // Inside the real car the body stays; it moves to the driver-only layer
+      // so the mirror camera looks through it, like real mirrors outside.
+      this.model.root.traverse((o) => o.layers.set(on ? 1 : 0));
+    } else this.body.visible = !on;
   }
 
   update(dt: number, inp: DriveInput, world: World) {
@@ -348,6 +398,18 @@ export class PlayerVehicle {
     // each way, like the G29's 900 degrees. Positive z turns it clockwise as
     // seen from the driver's seat.
     this.steeringWheel.rotation.z = inp.steer * Math.PI * 1.25;
+    if (this.model) {
+      const m = this.model;
+      if (m.steering && this.steerBase) {
+        // Turn about the column (the node's local Y axis).
+        m.steering.quaternion.copy(this.steerBase).multiply(this.tmpQ.setFromAxisAngle(AXIS_Y, -inp.steer * Math.PI * 1.25));
+      }
+      // Road wheels: roll with speed, fronts steer (model axes: X axle, Z up).
+      this.wheelSpin -= (this.vf * dt) / 0.36;
+      for (const w of m.wheels) {
+        w.obj.quaternion.copy(this.tmpQ.setFromAxisAngle(AXIS_Z, w.front ? this.steerAngle : 0)).multiply(this.tmpQ2.setFromAxisAngle(AXIS_X, this.wheelSpin)).multiply(w.base);
+      }
+    }
   }
 
   private step(h: number, inp: DriveInput, world: World) {
