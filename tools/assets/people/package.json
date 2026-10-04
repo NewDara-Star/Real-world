@@ -1,0 +1,16 @@
+{
+  "name": "realworld-people-build",
+  "private": true,
+  "description": "Builds the game's pedestrians from Microsoft Rocketbox (MIT). Dev tool only; nothing here ships.",
+  "type": "module",
+  "scripts": {
+    "build": "node build_people.mjs"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "^4.5.1",
+    "@gltf-transform/extensions": "^4.5.1",
+    "@gltf-transform/functions": "^4.5.1",
+    "fbx2gltf": "^0.9.7-p1",
+    "meshoptimizer": "^0.22.0"
+  }
+}

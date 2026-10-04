@@ -3,6 +3,7 @@ import { createVertexColorMaterial } from "./facade";
 import { makeTemplate, mulberry32, templateGeometry } from "./props";
 import { ALLOW_CAR, ALLOW_SERVICE, EDGE_STOP, EDGE_TWO_WAY, LaneKind, MARKED, type Lane, type Link, type RoadNet } from "./roadnet";
 import { carTemplate, walkerTemplate, type TrafficEvents } from "./traffic";
+import type { Crowd, CrowdPed } from "./crowd";
 
 // Rule-following traffic and pedestrians on a SUMO road network.
 //
@@ -128,6 +129,9 @@ export class NetTraffic {
   peds: Ped[] = [];
   private vMeshes: THREE.InstancedMesh[] = [];
   private wMeshes: THREE.InstancedMesh[] = [];
+  /** Human-looking pedestrians once their models have loaded; until then (or if they can't), simple walkers. */
+  private crowd: Crowd | null = null;
+  private crowdPeds: CrowdPed[] = [];
   private rand = mulberry32(Date.now() & 0xffff);
   private spawnLanes: Lane[];
   private footLanes: Lane[];
@@ -866,6 +870,13 @@ export class NetTraffic {
 
   // ----------------------------------------------------------- render --
 
+  /** Swap the simple walkers for real people (crowd.ts). */
+  setCrowd(crowd: Crowd) {
+    this.crowd = crowd;
+    this.group.add(crowd.group);
+    for (const m of this.wMeshes) m.visible = false;
+  }
+
   private render(dt: number) {
     const vc = this.vMeshes.map(() => 0);
     for (const c of this.cars) {
@@ -879,6 +890,18 @@ export class NetTraffic {
       mesh.count = vc[i];
       mesh.instanceMatrix.needsUpdate = true;
     });
+    if (this.crowd) {
+      const list = this.crowdPeds;
+      list.length = 0;
+      this.peds.forEach((p, i) => {
+        if (!p.active) return;
+        const y = p.lane?.kind === LaneKind.Footpath || p.area ? 0.15 : 0.03;
+        const standing = p.knocked > 0 || p.waiting !== 0;
+        list.push({ key: i, x: p.x, y, z: p.z, yaw: p.yaw, speed: standing ? 0 : p.v, lying: p.knocked > 0 });
+      });
+      this.crowd.update(list, this.player.x, this.player.z, dt);
+      return;
+    }
     const wc = this.wMeshes.map(() => 0);
     for (const p of this.peds) {
       if (!p.active) continue;

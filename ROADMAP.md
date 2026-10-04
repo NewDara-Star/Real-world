@@ -50,16 +50,15 @@ physics and the driver. `research/15-what-it-takes.md` is the full map.
    sliding sideways when stopped; research 17). Spawns weighted by road class,
    later by Dublin's junction counts; a driver profile per place (assertive
    share, gap acceptance, junction blocking), which Lagos needs (research 18).
-10. **Pedestrians:** social force model, trips, crossings, and human-looking
-    people (research 20): Microsoft Rocketbox characters and their own
-    walk/idle clips (MIT), baked into an animation texture and drawn as
-    instanced skinned meshes (prototype works in r186), with stride speed
-    matched to walking speed. About 6 days for Finglas, plus about 3 for
-    Lagos people from MakeHuman/MPFB2 (CC0) since Rocketbox has few Black
-    civilians and no West African clothing. **Owner's decisions needed:**
-    Rocketbox's skeleton as the house rig for every human; commit the
-    converted models (~12–15 MB) or fetch them with a script; include or
-    leave out the foreign police, military and fire uniforms.
+10. **Pedestrians:** human-looking people are in for Finglas (research 20):
+    33 Microsoft Rocketbox people (MIT) built by
+    `tools/assets/people/build_people.mjs`, drawn as instanced skinned meshes
+    from baked animation textures (`crowd.ts`), stride matched to walking
+    speed, near/far detail; the player and other players are real people too
+    (`avatar.ts`). Still open: social-force walking and trips, waiting at
+    crossings with the right idles, a native-WebGPU check on the Mac, and
+    Lagos people from MakeHuman/MPFB2 (CC0; about 3 days) since Rocketbox has
+    few Black civilians and no West African clothing.
 
 ## Next: look (Teleoperator, djentic and Mars GT teardowns, `research/06-…`, `07-…`)
 

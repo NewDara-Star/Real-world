@@ -1,7 +1,9 @@
 import * as THREE from "three/webgpu";
+import { hash, isFarDetail, loadClip, loadPerson, peopleManifest } from "./crowd";
 
-// A low-poly person built from boxes: about 150 triangles and five draw calls.
-// Lighting is baked into vertex colours so it shares the world's unlit look.
+// A player's person: a real Rocketbox human (crowd.ts, research 20) with its
+// own animation mixer, walking and idling to match its speed. Until the model
+// has loaded, or if it can't, the old low-poly box person stands in.
 
 const SKINS = [0x5b3a29, 0x6b4430, 0x7a4e36, 0x8d5b3e, 0x4a2f22, 0x9b6a4a];
 const TROUSERS = [0x2b2d42, 0x3d405b, 0x1f1f1f, 0x4b3f2f, 0x5c677d];
@@ -30,6 +32,11 @@ function shadedBox(w: number, h: number, d: number, hex: number, pivotTop: boole
 
 export class Avatar {
   root = new THREE.Group();
+  private boxes: THREE.Object3D[] = [];
+  private mixer: THREE.AnimationMixer | null = null;
+  private walk: THREE.AnimationAction | null = null;
+  private idle: THREE.AnimationAction | null = null;
+  private walkSpeed = 1.1;
   private legL: THREE.Mesh;
   private legR: THREE.Mesh;
   private armL: THREE.Mesh;
@@ -64,11 +71,53 @@ export class Avatar {
     this.root.traverse((o) => {
       if (o instanceof THREE.Mesh && o !== shadow) o.castShadow = true;
     });
+    this.boxes = [...this.root.children].filter((o) => o !== shadow);
+    void this.becomeHuman(seed);
+  }
+
+  /** Swap the box body for a real person, picked from the seed. */
+  private async becomeHuman(seed: number) {
+    const man = await peopleManifest();
+    if (!man?.avatars.length) return;
+    const a = man.avatars[hash(seed) % man.avatars.length];
+    try {
+      const [scene, walk, idle] = await Promise.all([loadPerson(a.name), loadClip(man.clips[a.sex].walk[0]), loadClip(man.clips[a.sex].idle[0])]);
+      // Near detail only: this person is always close to the camera.
+      scene.traverse((o) => {
+        if (isFarDetail(o.name)) o.visible = false;
+        if ((o as THREE.Mesh).isMesh) o.castShadow = true;
+      });
+      this.mixer = new THREE.AnimationMixer(scene);
+      if (walk) {
+        this.walk = this.mixer.clipAction(walk).play();
+        this.walk.setEffectiveWeight(0);
+        this.walkSpeed = man.walkSpeed[walk.name] ?? 1.1;
+      }
+      if (idle) this.idle = this.mixer.clipAction(idle).play();
+      for (const b of this.boxes) b.visible = false;
+      this.root.add(scene);
+    } catch {
+      // Keep the box person.
+    }
   }
 
   /** speed in m/s drives the walk cycle. */
   animate(dt: number, speed: number) {
     const moving = speed > 0.2;
+    if (this.mixer) {
+      // Fade between standing and walking, and play the walk at the pace
+      // that matches the ground speed so feet don't slide.
+      const w = this.walk, i = this.idle;
+      const target = moving ? 1 : 0;
+      if (w) {
+        const cur = w.getEffectiveWeight();
+        w.setEffectiveWeight(cur + (target - cur) * Math.min(1, dt * 6));
+        w.timeScale = moving ? Math.min(2.5, speed / this.walkSpeed) : 1;
+      }
+      if (i) i.setEffectiveWeight(1 - (w?.getEffectiveWeight() ?? 0));
+      this.mixer.update(dt);
+      return;
+    }
     this.phase += dt * (moving ? 2.2 + speed * 1.1 : 0);
     const swing = moving ? Math.min(0.75, 0.25 + speed * 0.09) : 0;
     const s = Math.sin(this.phase) * swing;

@@ -1,0 +1,338 @@
+{
+ "source": "Microsoft Rocketbox (MIT)",
+ "rig": "Bip01",
+ "avatars": [
+  {
+   "name": "Male_Adult_01",
+   "sex": "m",
+   "places": [
+    "finglas"
+   ],
+   "tris": 7440,
+   "trisLod1": 1862
+  },
+  {
+   "name": "Male_Adult_02",
+   "sex": "m",
+   "places": [
+    "finglas"
+   ],
+   "tris": 7312,
+   "trisLod1": 1941
+  },
+  {
+   "name": "Male_Adult_03",
+   "sex": "m",
+   "places": [
+    "finglas"
+   ],
+   "tris": 7200,
+   "trisLod1": 1686
+  },
+  {
+   "name": "Male_Adult_05",
+   "sex": "m",
+   "places": [
+    "finglas"
+   ],
+   "tris": 7836,
+   "trisLod1": 1916
+  },
+  {
+   "name": "Male_Adult_06",
+   "sex": "m",
+   "places": [
+    "finglas"
+   ],
+   "tris": 7456,
+   "trisLod1": 1871
+  },
+  {
+   "name": "Male_Adult_07",
+   "sex": "m",
+   "places": [
+    "finglas"
+   ],
+   "tris": 7588,
+   "trisLod1": 1803
+  },
+  {
+   "name": "Male_Adult_08",
+   "sex": "m",
+   "places": [
+    "finglas"
+   ],
+   "tris": 7364,
+   "trisLod1": 1796
+  },
+  {
+   "name": "Male_Adult_09",
+   "sex": "m",
+   "places": [
+    "finglas"
+   ],
+   "tris": 7428,
+   "trisLod1": 1714
+  },
+  {
+   "name": "Male_Adult_10",
+   "sex": "m",
+   "places": [
+    "finglas"
+   ],
+   "tris": 6732,
+   "trisLod1": 1603
+  },
+  {
+   "name": "Male_Adult_11",
+   "sex": "m",
+   "places": [
+    "finglas"
+   ],
+   "tris": 6740,
+   "trisLod1": 1480
+  },
+  {
+   "name": "Female_Adult_01",
+   "sex": "f",
+   "places": [
+    "finglas"
+   ],
+   "tris": 8732,
+   "trisLod1": 2131
+  },
+  {
+   "name": "Female_Adult_02",
+   "sex": "f",
+   "places": [
+    "finglas"
+   ],
+   "tris": 8940,
+   "trisLod1": 2053
+  },
+  {
+   "name": "Female_Adult_03",
+   "sex": "f",
+   "places": [
+    "finglas"
+   ],
+   "tris": 9208,
+   "trisLod1": 2407
+  },
+  {
+   "name": "Female_Adult_04",
+   "sex": "f",
+   "places": [
+    "finglas"
+   ],
+   "tris": 9284,
+   "trisLod1": 2698
+  },
+  {
+   "name": "Female_Adult_05",
+   "sex": "f",
+   "places": [
+    "finglas"
+   ],
+   "tris": 8288,
+   "trisLod1": 2347
+  },
+  {
+   "name": "Female_Adult_06",
+   "sex": "f",
+   "places": [
+    "finglas"
+   ],
+   "tris": 6992,
+   "trisLod1": 1667
+  },
+  {
+   "name": "Female_Adult_07",
+   "sex": "f",
+   "places": [
+    "finglas"
+   ],
+   "tris": 8308,
+   "trisLod1": 2168
+  },
+  {
+   "name": "Female_Adult_08",
+   "sex": "f",
+   "places": [
+    "finglas"
+   ],
+   "tris": 8276,
+   "trisLod1": 2074
+  },
+  {
+   "name": "Female_Adult_09",
+   "sex": "f",
+   "places": [
+    "finglas"
+   ],
+   "tris": 9032,
+   "trisLod1": 2261
+  },
+  {
+   "name": "Female_Adult_10",
+   "sex": "f",
+   "places": [
+    "finglas"
+   ],
+   "tris": 6460,
+   "trisLod1": 1519
+  },
+  {
+   "name": "Business_Male_01",
+   "sex": "m",
+   "places": [
+    "finglas"
+   ],
+   "tris": 7435,
+   "trisLod1": 1831
+  },
+  {
+   "name": "Business_Female_02",
+   "sex": "f",
+   "places": [
+    "finglas"
+   ],
+   "tris": 8640,
+   "trisLod1": 2323
+  },
+  {
+   "name": "Male_Child_01",
+   "sex": "m",
+   "places": [
+    "finglas"
+   ],
+   "tris": 6660,
+   "trisLod1": 1464
+  },
+  {
+   "name": "Female_Child_01",
+   "sex": "f",
+   "places": [
+    "finglas"
+   ],
+   "tris": 7102,
+   "trisLod1": 1578
+  },
+  {
+   "name": "Male_Adult_04",
+   "sex": "m",
+   "places": [
+    "finglas",
+    "yaba"
+   ],
+   "tris": 8684,
+   "trisLod1": 2152
+  },
+  {
+   "name": "Male_Adult_12",
+   "sex": "m",
+   "places": [
+    "finglas",
+    "yaba"
+   ],
+   "tris": 6722,
+   "trisLod1": 1477
+  },
+  {
+   "name": "Business_Female_01",
+   "sex": "f",
+   "places": [
+    "finglas",
+    "yaba"
+   ],
+   "tris": 8966,
+   "trisLod1": 2231
+  },
+  {
+   "name": "Male_Adult_18",
+   "sex": "m",
+   "places": [
+    "yaba"
+   ],
+   "tris": 6434,
+   "trisLod1": 1414
+  },
+  {
+   "name": "Male_Child_02",
+   "sex": "m",
+   "places": [
+    "yaba"
+   ],
+   "tris": 7310,
+   "trisLod1": 1606
+  },
+  {
+   "name": "Sports_Male_03",
+   "sex": "m",
+   "places": [
+    "yaba"
+   ],
+   "tris": 9534,
+   "trisLod1": 2529
+  },
+  {
+   "name": "Business_Male_05",
+   "sex": "m",
+   "places": [
+    "yaba"
+   ],
+   "tris": 7164,
+   "trisLod1": 1575
+  },
+  {
+   "name": "Construction_Male_03",
+   "sex": "m",
+   "places": [
+    "yaba"
+   ],
+   "tris": 9376,
+   "trisLod1": 2576
+  },
+  {
+   "name": "Female_Party_02",
+   "sex": "f",
+   "places": [
+    "yaba"
+   ],
+   "tris": 9874,
+   "trisLod1": 2893
+  }
+ ],
+ "clips": {
+  "m": {
+   "walk": [
+    "m_walk_neutral_01",
+    "m_walk_neutral_02",
+    "m_walk_slow_01"
+   ],
+   "idle": [
+    "m_idle_neutral_01",
+    "m_idle_look_around_01"
+   ]
+  },
+  "f": {
+   "walk": [
+    "f_walk_neutral_01",
+    "f_walk_neutral_02",
+    "f_walk_slow_01"
+   ],
+   "idle": [
+    "f_idle_neutral_01",
+    "f_idle_look_around_01"
+   ]
+  }
+ },
+ "walkSpeed": {
+  "m_walk_neutral_01": 1.012,
+  "m_walk_neutral_02": 1.348,
+  "m_walk_slow_01": 0.821,
+  "f_walk_neutral_01": 1.214,
+  "f_walk_neutral_02": 1.322,
+  "f_walk_slow_01": 0.887
+ }
+}

@@ -9,6 +9,7 @@ import { Input } from "./input";
 import { Net } from "./net";
 import { Traffic } from "./traffic";
 import { NetTraffic } from "./trafficnet";
+import { Crowd } from "./crowd";
 import { RoadSigns } from "./roadsigns";
 import { ALLOW_CAR, ALLOW_SERVICE, LaneKind } from "./roadnet";
 import { Examiner, type Fault } from "./rules";
@@ -252,9 +253,18 @@ world
       },
     };
     // Places baked with a road network get rule-following traffic.
+    const walkers = isTouch ? 50 : 110;
     traffic = world.net
-      ? new NetTraffic(world.net, honk, isTouch ? { vehicles: 30, walkers: 50 } : { vehicles: 70, walkers: 110 }, CITY.drive)
+      ? new NetTraffic(world.net, honk, { vehicles: isTouch ? 30 : 70, walkers }, CITY.drive)
       : new Traffic(world, honk, isTouch ? { vehicles: 24, walkers: 30 } : { vehicles: 40, walkers: 60 });
+    // Real people replace the simple walkers once their models load (a few MB);
+    // if they can't load, the simple walkers stay.
+    if (traffic instanceof NetTraffic) {
+      const t = traffic;
+      void Crowd.load(ZONE, walkers).then((crowd) => {
+        if (crowd && traffic === t) t.setCrowd(crowd);
+      });
+    }
     if (DEBUG) Object.assign(window, { __traffic: traffic });
     if (DEBUG) setTimeout(() => Object.assign(window, { __nav: navigator_ }), 0);
     if (world.net) {
