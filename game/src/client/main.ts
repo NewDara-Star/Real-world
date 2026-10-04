@@ -15,6 +15,7 @@ import { Examiner, type Fault } from "./rules";
 import { Navigator } from "./nav";
 import { MapView } from "./map";
 import { preloadCarModel } from "./carmodel";
+import { initPhysics } from "./carphysics";
 import { texturesEnabled } from "./textures";
 import { World, type Place } from "./world";
 import { FLAG_DANFO, FLAG_DRIVING, FLAG_MOVING, FLAG_RUNNING, type MoveState, type PlayerInfo } from "../shared/protocol";
@@ -127,6 +128,14 @@ const g29 = new G29();
 drive.g29 = g29;
 let ffbJolt = 0; // decaying crash/kerb force, -1..1
 let ffbPhase = 0;
+/** Force feedback settings from the wheel monitor: strength 0..1.5, and direction. */
+const ffb = (() => {
+  try {
+    return { gain: Number(localStorage.getItem("ffb-gain") ?? "1") || 0, invert: localStorage.getItem("ffb-invert") === "1" };
+  } catch {
+    return { gain: 1, invert: false };
+  }
+})();
 let car: PlayerVehicle | null = null;
 let cockpit = false;
 let hornCooldown = 0;
@@ -219,6 +228,7 @@ if (SOLO) {
 }
 const enterBtn = $<HTMLButtonElement>("enter");
 void preloadCarModel();
+void initPhysics();
 
 world
   .load(ZONE, (p) => (enterBtn.textContent = `Loading ${CITY.label}… ${Math.round(p * 100)}%`))
@@ -751,6 +761,7 @@ function exitVehicle() {
   me.camYaw = car.yaw + Math.PI;
   setCockpit(car, false);
   scene.remove(car.root);
+  car.dispose();
   car = null;
   me.avatar.root.visible = true;
   audio.drive(false, "car", 0, 0, 0, 0);
@@ -777,7 +788,7 @@ function driveFrame(dt: number, now: number) {
     if (why) toast(why);
   }
   c.controls(inp, dt);
-  c.update(dt, inp, world);
+  c.update(dt, inp, world, traffic instanceof NetTraffic ? traffic : undefined);
   if (c.ticked !== null) audio.tick(c.ticked);
   if (c.wiped) audio.wipe();
   // Passenger mirror is ~55 degrees across the car; a glance turns the eyes most of the way.
@@ -799,7 +810,8 @@ function driveFrame(dt: number, now: number) {
     for (const o of [c.spec.length / 2 - r, -(c.spec.length / 2 - r)]) {
       const hit = traffic.collide(c.x + fx * o, c.z + fz * o, r);
       if (hit) {
-        c.bump(hit.nx, hit.nz, hit.depth);
+        // With the rigid-body car the physics engine already handled a car-on-car hit.
+        if (!c.phys || hit.kind !== "car") c.bump(hit.nx, hit.nz, hit.depth);
         hitKind = hit.kind;
       }
     }
@@ -812,13 +824,26 @@ function driveFrame(dt: number, now: number) {
     ffbJolt = (c.vr >= 0 ? 1 : -1) * Math.min(1, c.impact / 10);
   }
   if (g29.connected) {
-    // Power-steering feel: light when parked, firmer with speed, lighter when sliding.
-    void g29.setSpring(Math.min(0.85, 0.12 + c.speed / 30) * (1 - c.slip * 0.6));
-    // Road texture: a faint buzz that grows with speed, plus any crash jolt.
-    ffbPhase += dt * (8 + c.speed * 1.5);
-    const buzz = c.speed > 2 ? Math.sin(ffbPhase) * Math.min(0.06, c.speed / 400) : 0;
     ffbJolt *= Math.pow(0.002, dt);
-    void g29.setForce(Math.abs(ffbJolt) > 0.02 ? ffbJolt : buzz);
+    if (c.kerbJolt) ffbJolt = c.kerbJolt;
+    const dir = ffb.invert ? -1 : 1;
+    if (c.phys) {
+      // Like sim racing: the wheel is driven by the front tyres' self-aligning
+      // torque, which builds with cornering force and goes light as they slide.
+      // A little spring and a faint road texture sit underneath.
+      void g29.setSpring(0.06 * ffb.gain);
+      ffbPhase += dt * (8 + c.speed * 1.5);
+      const buzz = c.speed > 2 ? Math.sin(ffbPhase) * Math.min(0.03, c.speed / 800) : 0;
+      const align = c.phys.steerTorque * 0.045;
+      void g29.setForce(dir * ffb.gain * Math.max(-1, Math.min(1, align + ffbJolt + buzz)));
+    } else {
+      // Power-steering feel: light when parked, firmer with speed, lighter when sliding.
+      void g29.setSpring(Math.min(0.85, 0.12 + c.speed / 30) * (1 - c.slip * 0.6) * ffb.gain);
+      // Road texture: a faint buzz that grows with speed, plus any crash jolt.
+      ffbPhase += dt * (8 + c.speed * 1.5);
+      const buzz = c.speed > 2 ? Math.sin(ffbPhase) * Math.min(0.06, c.speed / 400) : 0;
+      void g29.setForce(dir * ffb.gain * (Math.abs(ffbJolt) > 0.02 ? ffbJolt : buzz));
+    }
     void g29.setRevLights(c.rpm > 0.35 ? (c.rpm - 0.35) / 0.6 : 0);
   }
   if (inp.horn && hornCooldown <= 0) {
@@ -915,7 +940,6 @@ function placeDriveCamera(dt: number, c: PlayerVehicle) {
   if (cockpit) {
     // Driver's eye: left seat, looking down the road (plus any look-around).
     const p = c.spec.cockpit;
-    const rx = -fz, rz = fx;
     // The head leans into a check: toward the window for a side look,
     // toward the middle of the car (and up) for a look over the shoulder.
     const turn = Math.min(1, Math.abs(headYaw) / 1.35);
@@ -923,11 +947,11 @@ function placeDriveCamera(dt: number, c: PlayerVehicle) {
     const ex = p.x + Math.sign(headYaw) * turn * 0.1 + (Math.abs(headYaw) > 1.4 ? c.seat * -lean * 0.25 : 0);
     const ey = p.y + lean * 0.05;
     const ez = p.z - lean * 0.12;
-    camera.position.set(c.x + fx * ez - rx * ex, ey, c.z + fz * ez - rz * ex);
-    const ly = c.yaw + lookOffset + headYaw;
-    camera.lookAt(camera.position.x + Math.sin(ly) * 10, ey - 0.35, camera.position.z + Math.cos(ly) * 10);
+    // The head rides with the car, so pitch under braking and roll in bends show.
+    c.placeCamera(camera, ex, ey, ez, lookOffset + headYaw);
     return;
   }
+  camera.up.set(0, 1, 0);
   // Chase camera swings behind the car, further out with speed.
   const want = c.yaw + Math.PI + lookOffset + headYaw;
   me.camYaw = lerpAngle(me.camYaw, want, Math.min(1, dt * 3.5));
@@ -976,6 +1000,20 @@ $("wheel-check").addEventListener("click", () => openWheelMon(!wheelMonOpen));
 $("wm-close").addEventListener("click", () => openWheelMon(false));
 $<HTMLInputElement>("wm-swap").checked = drive.swapPedals;
 $("wm-swap").addEventListener("change", () => drive.setSwap($<HTMLInputElement>("wm-swap").checked));
+$<HTMLInputElement>("wm-ffb-invert").checked = ffb.invert;
+$<HTMLInputElement>("wm-ffb-gain").value = String(Math.round(ffb.gain * 100));
+const saveFfb = () => {
+  ffb.invert = $<HTMLInputElement>("wm-ffb-invert").checked;
+  ffb.gain = Number($<HTMLInputElement>("wm-ffb-gain").value) / 100;
+  try {
+    localStorage.setItem("ffb-invert", ffb.invert ? "1" : "0");
+    localStorage.setItem("ffb-gain", String(ffb.gain));
+  } catch {
+    // ignore
+  }
+};
+$("wm-ffb-invert").addEventListener("change", saveFfb);
+$("wm-ffb-gain").addEventListener("input", saveFfb);
 function updateWheelMon(dt: number) {
   if (!wheelMonOpen) return;
   if (!car) drive.read(dt); // refresh readings while walking too

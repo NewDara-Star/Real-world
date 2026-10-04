@@ -9,15 +9,11 @@ engines, published data), then build. See `research/` for the notes.
 1. **Check the textures on the Mac** (user). Atlas textures fixed the black city
    in testing, but they haven't been seen on the real GPU yet. If anything still
    looks wrong: pause → "Real textures: off", and send a screenshot.
-2. **Car physics upgrade** (approved).
-   - Rigid-body chassis with raycast suspension: Rapier
-     (`DynamicRayCastVehicleController` lineage, from Bullet's `btRaycastVehicle`).
-   - Pacejka Magic Formula tyres with a published coefficient set (MF-Tyre is
-     the industry standard; Tread is a JS reference).
-   - Real car data for a typical automatic hatchback: mass, centre-of-gravity
-     height, weight split, wheelbase, track, gear ratios, torque curve.
-   - Proper collisions (cars, walls, kerbs) from the physics engine.
-   - Force feedback from the front tyres' self-aligning torque, as in sim racing.
+2. **Car physics: try it on the G29** (user). Built and tested headless
+   (`research/08-…`). Needs a real-wheel check: if the wheel pulls away from
+   centre instead of toward it, Wheel check → "Reverse force feedback"; set the
+   strength there too. Next in physics: kerb faces, surface grip (grass, wet),
+   the danfo on the new model.
 3. **Live weather** from Open-Meteo (free, no key; runs on the user's machine).
    - Rain particles, wet roads (darker, glossier, reflections), puddles, fog, wind.
    - Wipers get their job; the examiner adds a "use dipped lights in rain" check.
@@ -34,12 +30,15 @@ engines, published data), then build. See `research/` for the notes.
    - Trips: home to shop, bus stop, school; groups; waiting at crossings.
    - Animated models.
 
-## Next: look (from the Teleoperator teardown, `research/06-…`)
+## Next: look (Teleoperator, djentic and Mars GT teardowns, `research/06-…`, `07-…`)
 
-6. Colour grade and exposure per time of day; fog warm toward the sun, thinner
-   with height.
-7. Bake sky visibility (large-scale AO) into the world; proper sun shadows (CSM
-   with a static cache); temporal anti-aliasing plus sharpen instead of SMAA.
+6. Sky reflections: render the sky into a cubemap for `scene.environment`;
+   clearcoat car paint. Colour grade and auto-exposure keyed to sun height and
+   weather; height fog coloured by the sky.
+7. Bake sky visibility (large-scale AO) into the world, and apply GTAO only in
+   shade; cascaded sun shadows (`CSMShadowNode`, staggered refresh); temporal
+   anti-aliasing plus sharpen (`TRAANode`) instead of SMAA; adaptive quality by
+   pixel budget.
 8. Building fronts: facade images per Finglas house style, with metadata that
    drives real 3D porches, eaves and window reveals; interior-mapped windows;
    weathering. Mapillary photos where coverage exists (needs `MAPILLARY_TOKEN`).
@@ -57,6 +56,9 @@ engines, published data), then build. See `research/` for the notes.
     via `tools/bake/add_place.py`.
 
 ## Done
+
+- Car physics: Rapier rigid body, raycast suspension, Pacejka tyres, DSG
+  automatic, ABS/TCS, wall and traffic collisions, tyre-torque force feedback
 
 - World map launcher (NASA Earth, places, one-command baking)
 - SUMO road network: lanes, junction rules, signals, footpaths, crossings

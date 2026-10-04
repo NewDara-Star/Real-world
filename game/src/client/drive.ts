@@ -10,10 +10,22 @@ const AXIS_X = new THREE.Vector3(1, 0, 0);
 const AXIS_Y = new THREE.Vector3(0, 1, 0);
 const AXIS_Z = new THREE.Vector3(0, 0, 1);
 import type { World } from "./world";
+import { CarPhysics, HATCH_AUTO, physicsReady, type GroundFn } from "./carphysics";
+import { ALLOW_PED, LaneKind } from "./roadnet";
 
-// Arcade-sim car physics tuned to feel good on a wheel: a bicycle model with
-// engine/brake/drag forces, speed-sensitive steering, lateral grip that breaks
-// away under the handbrake, and wall collisions against real Yaba buildings.
+/** Something that can list the AI vehicles near a point (NetTraffic). */
+export interface TrafficSource {
+  nearCars(x: number, z: number, r: number): { key: unknown; x: number; z: number; yaw: number; len: number; w: number }[];
+}
+
+// The model's origin (road level, midway between the axles) in the physics
+// body's frame (centre of gravity; +x left, +z forward).
+const ORIGIN = { x: 0, y: -HATCH_AUTO.cgHeight, z: -(HATCH_AUTO.cgToRear - HATCH_AUTO.cgToFront) / 2 };
+const PATH_Y = 0.15, ROAD_Y = 0.03;
+
+// The player's vehicle. The car runs on the rigid-body simulation in
+// carphysics.ts (Rapier, Pacejka tyres, DSG automatic). The danfo, and the car
+// until the physics engine has loaded, use the older bicycle model below.
 
 export type VehicleKind = "car" | "danfo";
 /** Automatic gear selector. */
@@ -95,6 +107,16 @@ export class PlayerVehicle {
   private wheelSpin = 0;
   private tmpQ = new THREE.Quaternion();
   private tmpQ2 = new THREE.Quaternion();
+  /** Rigid-body simulation (the car, once Rapier has loaded). */
+  phys: CarPhysics | null = null;
+  /** Steering sent to the physics, -1..1 (rate-limited for keys and pads). */
+  private steerCmd = 0;
+  /** Force-feedback kick from a kerb or pothole this frame, -1..1. */
+  kerbJolt = 0;
+  private lastGround = [0, 0, 0, 0];
+  private wheelAngle = [0, 0, 0, 0];
+  private wheelRest: { pos: THREE.Vector3; up: THREE.Vector3 }[] | null = null;
+  private upsideDown = 0;
   /** Events for the frame, for sounds: flasher relay and wiper end-of-sweep. */
   ticked: boolean | null = null;
   wiped = false;
@@ -370,6 +392,7 @@ export class PlayerVehicle {
   /** Driver's eye in world space (no head check), for the mirror camera. */
   eye(out: THREE.Vector3) {
     const c = this.spec.cockpit;
+    if (this.phys) return this.root.localToWorld(out.copy(c));
     const fx = Math.sin(this.yaw), fz = Math.cos(this.yaw);
     return out.set(this.x + fx * c.z + fz * c.x, c.y, this.z + fz * c.z - fx * c.x);
   }
@@ -387,12 +410,19 @@ export class PlayerVehicle {
     } else this.body.visible = !on;
   }
 
-  update(dt: number, inp: DriveInput, world: World) {
-    // Fixed sub-steps keep the integration stable at low frame rates.
-    const steps = Math.max(1, Math.ceil(dt / (1 / 120)));
-    const h = dt / steps;
+  update(dt: number, inp: DriveInput, world: World, traffic?: TrafficSource) {
     this.impact = 0;
-    for (let i = 0; i < steps; i++) this.step(h, inp, world);
+    if (this.kind === "car" && !this.phys && physicsReady()) {
+      this.phys = new CarPhysics(HATCH_AUTO, this.x - Math.sin(this.yaw) * ORIGIN.z, this.z - Math.cos(this.yaw) * ORIGIN.z, this.yaw, world.footprintList);
+      if (world.meta) this.phys.addBounds(world.meta.half.x, world.meta.half.z);
+    }
+    if (this.phys) this.stepPhysics(dt, inp, world, traffic);
+    else {
+      // Fixed sub-steps keep the integration stable at low frame rates.
+      const steps = Math.max(1, Math.ceil(dt / (1 / 120)));
+      const h = dt / steps;
+      for (let i = 0; i < steps; i++) this.step(h, inp, world);
+    }
     this.sync();
     // The on-screen wheel mirrors the player's input: full lock = 1.25 turns
     // each way, like the G29's 900 degrees. Positive z turns it clockwise as
@@ -406,10 +436,104 @@ export class PlayerVehicle {
       }
       // Road wheels: roll with speed, fronts steer (model axes: X axle, Z up).
       this.wheelSpin -= (this.vf * dt) / 0.36;
-      for (const w of m.wheels) {
-        w.obj.quaternion.copy(this.tmpQ.setFromAxisAngle(AXIS_Z, w.front ? this.steerAngle : 0)).multiply(this.tmpQ2.setFromAxisAngle(AXIS_X, this.wheelSpin)).multiply(w.base);
-      }
+      if (this.phys && !this.wheelRest) this.measureWheels();
+      m.wheels.forEach((w, i) => {
+        let spin = this.wheelSpin;
+        const pw = this.phys?.wheels[this.physWheel(w.obj.name)];
+        if (this.phys && pw && this.wheelRest) {
+          // Each wheel spins at its own rate (a locked or spinning wheel shows)
+          // and rides up and down on its spring relative to the body.
+          const k = this.physWheel(w.obj.name);
+          this.wheelAngle[k] -= pw.omega * dt;
+          spin = this.wheelAngle[k];
+          const rest = this.wheelRest[i];
+          const travel = Math.max(-0.12, Math.min(0.12, this.phys.staticLen[k] - pw.len));
+          w.obj.position.copy(rest.pos).addScaledVector(rest.up, travel);
+        }
+        w.obj.quaternion.copy(this.tmpQ.setFromAxisAngle(AXIS_Z, w.front ? this.steerAngle : 0)).multiply(this.tmpQ2.setFromAxisAngle(AXIS_X, spin)).multiply(w.base);
+      });
     }
+  }
+
+  /** Physics wheel index for a model wheel node: 0 FL, 1 FR, 2 RL, 3 RR. */
+  private physWheel(name: string) {
+    return (name.includes("Rear") ? 2 : 0) + (name.endsWith("R") ? 1 : 0);
+  }
+
+  /** Each model wheel's rest position, and the car's up axis in its parent's frame. */
+  private measureWheels() {
+    if (!this.model) return;
+    this.root.updateMatrixWorld(true);
+    this.wheelRest = this.model.wheels.map((w) => {
+      const toParent = new THREE.Matrix4().copy(w.obj.parent!.matrixWorld).invert().multiply(this.root.matrixWorld);
+      return { pos: w.obj.position.clone(), up: new THREE.Vector3(0, 1, 0).transformDirection(toParent) };
+    });
+  }
+
+  /** Rigid-body car: feed the controls in, read the state back out. */
+  private stepPhysics(dt: number, inp: DriveInput, world: World, traffic?: TrafficSource) {
+    const p = this.phys!;
+    // A real wheel is the steering wheel (900 degrees, 14:1). Keys and pads
+    // get a rate limit and less lock at speed, as in every driving game.
+    if (inp.device === "wheel") this.steerCmd = inp.steer;
+    else {
+      const v = Math.max(1, Math.abs(this.vf));
+      const lock = Math.min(1, Math.atan((2.55 * 0.8 * 9.81) / (v * v)) / HATCH_AUTO.maxSteer);
+      const target = inp.steer * lock;
+      const rate = inp.device === "gamepad" ? 6 : 2.2;
+      this.steerCmd += Math.max(-rate * dt, Math.min(rate * dt, target - this.steerCmd));
+    }
+    const net = world.net;
+    const ground: GroundFn = (x, z) => {
+      if (!net) return ROAD_Y;
+      const hit = net.locate(x, z, null, ALLOW_PED);
+      return hit && hit.lane.kind === LaneKind.Footpath && Math.abs(hit.lat) < hit.lane.width / 2 ? PATH_Y : ROAD_Y;
+    };
+    p.streamWalls();
+    const cg = p.position;
+    if (traffic) p.syncTraffic(traffic.nearCars(cg.x, cg.z, 40));
+    p.step(dt, { throttle: inp.throttle, brake: inp.brake, handbrake: inp.handbrake, steer: this.steerCmd, selector: this.selector, parkBrake: this.parkBrake }, ground);
+
+    const o = p.toWorld(ORIGIN);
+    this.x = o.x;
+    this.z = o.z;
+    this.yaw = p.yaw;
+    const lv = p.localVelocity();
+    this.vf = lv.vf;
+    this.vr = lv.vr;
+    this.yawRate = lv.yawRate;
+    this.steerAngle = this.steerCmd * HATCH_AUTO.maxSteer;
+    this.slip = Math.min(1, p.slip);
+    this.impact = Math.max(this.impact, p.impact);
+    this.rpm = p.rpm / 6500; // 0..1 for the engine sound
+    this.gear = this.selector === "D" ? p.gear : this.selector === "R" ? 1 : 0;
+    // Kerb strikes: a front wheel's ground height jumping, one side more than the other.
+    const g = p.wheels.map((w) => w.ground);
+    const dl = g[0] - this.lastGround[0], dr = g[1] - this.lastGround[1];
+    this.kerbJolt = Math.abs(dl - dr) > 0.05 && Math.abs(this.vf) > 0.5 ? Math.sign(dr - dl) * 0.6 : 0;
+    this.lastGround = g;
+    // On its side or roof for a few seconds: put it back on its wheels.
+    this.upsideDown = p.upY < 0.3 ? this.upsideDown + dt : 0;
+    if (this.upsideDown > 3) {
+      p.reset(o.x, o.z, this.yaw);
+      this.upsideDown = 0;
+    }
+  }
+
+  /** Place a camera at a point in the car's frame, looking `look` radians left of ahead. */
+  placeCamera(cam: THREE.Camera, ex: number, ey: number, ez: number, look: number) {
+    this.root.updateMatrixWorld();
+    const p = this.root.localToWorld(new THREE.Vector3(ex, ey, ez));
+    const t = this.root.localToWorld(new THREE.Vector3(ex + Math.sin(look) * 10, ey - 0.35, ez + Math.cos(look) * 10));
+    cam.position.copy(p);
+    cam.up.set(0, 1, 0).applyQuaternion(this.root.quaternion);
+    cam.lookAt(t);
+  }
+
+  /** Free the physics world (on getting out). */
+  dispose() {
+    this.phys?.dispose();
+    this.phys = null;
   }
 
   private step(h: number, inp: DriveInput, world: World) {
@@ -524,6 +648,13 @@ export class PlayerVehicle {
 
   /** Bump against another vehicle or a person: bleed speed. */
   bump(nx: number, nz: number, depth: number) {
+    if (this.phys) {
+      // A person: the car barely slows (the physics world has no people in it).
+      const v = this.phys.body.linvel();
+      this.phys.body.setLinvel({ x: v.x * 0.92, y: v.y, z: v.z * 0.92 }, true);
+      this.impact = Math.max(this.impact, Math.abs(this.vf) * 0.6);
+      return;
+    }
     this.x += nx * depth;
     this.z += nz * depth;
     this.impact = Math.max(this.impact, Math.abs(this.vf) * 0.6);
@@ -532,6 +663,15 @@ export class PlayerVehicle {
   }
 
   private sync() {
+    if (this.phys) {
+      // The whole body pitches, rolls and rides on its springs.
+      const o = this.phys.toWorld(ORIGIN);
+      const q = this.phys.body.rotation();
+      this.root.position.set(o.x, o.y, o.z);
+      this.root.quaternion.set(q.x, q.y, q.z, q.w);
+      this.body.rotation.z = 0;
+      return;
+    }
     this.root.position.set(this.x, 0, this.z);
     this.root.rotation.y = this.yaw;
     // A touch of body roll and pitch sells the weight, more on the danfo.

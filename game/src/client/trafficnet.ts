@@ -238,6 +238,15 @@ export class NetTraffic {
     this.render();
   }
 
+  /** Vehicles within r of (x, z), for the player's physics world. */
+  nearCars(x: number, z: number, r: number) {
+    const out: { key: unknown; x: number; z: number; yaw: number; len: number; w: number }[] = [];
+    for (const c of this.cars) {
+      if (c.active && (c.x - x) ** 2 + (c.z - z) ** 2 < r * r) out.push({ key: c, x: c.x, z: c.z, yaw: c.yaw, len: c.len, w: c.w });
+    }
+    return out;
+  }
+
   /** Push a circle (the player's car) out of traffic and people. */
   collide(x: number, z: number, r: number): { nx: number; nz: number; depth: number; kind: string } | null {
     let best: { nx: number; nz: number; depth: number; kind: string } | null = null;

@@ -14,6 +14,7 @@
     "package:mac": "vite build && electron-packager . \"Eko Drive\" --platform=darwin --arch=arm64 --out=release --overwrite --prune=true --ignore=\"^/(src|public|tools|research|release|node_modules|\\.wrangler)($|/)\""
   },
   "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.21.0",
     "three": "^0.186.1"
   },
   "devDependencies": {
