@@ -4,6 +4,38 @@ The plan for the driving simulator, in order. Update this file as items move.
 Rule: research how the industry does each thing first (simulators, game
 engines, published data), then build. See `research/` for the notes.
 
+## Raised from the owner's Mac (2026-10-04, local Claude ran the app)
+
+Seen by running the desktop app at 13:00 in Finglas. For the cloud dev to
+slot into the order below:
+
+- **Dev-only autodrive** (`?autodrive=1`): hand the player car to the AI
+  driver along the sat-nav route, so a local Claude (or a test) can drive a
+  route and screenshot it. Driving by key bursts between screenshots left
+  the road within 100 m.
+- **The wheel silently overrides the keyboard.** With the G29 plugged in,
+  `wheel.ts` takes steer and pedals from the wheel only, so its idle pedals
+  zero the keyboard; nothing on screen says so ("nothing behind their back").
+  Show it, or let the keyboard drive while the wheel's pedals are idle.
+- **Name:** the window title still says "Eko World — walk real Lagos" in
+  Finglas (and the Electron window is "Eko Drive"). The owner wants one name
+  of our own, e.g. "World Drive". Owner's decision; then change it everywhere.
+- **House numbers:** map search finds streets only. The bake keeps no
+  addresses at all (no OSM `addr:*`, no Overture addresses theme), so a home
+  address can't be found. Import whichever has Finglas coverage (check both;
+  Eircode/GeoDirectory are closed). Never hard-code the owner's address.
+- **Front gardens:** between road and houses is open lawn. Real Finglas
+  estates show footpath, kerb, garden wall with piers, hedge, driveway, bins
+  and lamp posts; that strip is most of the view from the car. The models
+  exist (`public/models/`, item 15); placing them is the biggest realism win.
+- **Models need to look real, not just measure right.** Today's street
+  furniture is correct in size and names but plain. Next pass uses reference
+  photos per asset. Buildings are boxes with one repeated window and trees are
+  low-poly blobs (house kits §6 and trees §5 in `docs/blender-assets.md`).
+- **Owner's decision needed:** reference photos from Geograph (CC BY-SA) and
+  Wikimedia Commons (per-file licences). Proposal: use them only as modelling
+  reference, never as textures or in the repo, like the Mapillary question.
+
 ## Now
 
 The research in `research/09`–`15` (open-source sims, Forza/AC/iRacing/BeamNG,
