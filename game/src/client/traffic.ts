@@ -1,4 +1,5 @@
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
+import { createVertexColorMaterial } from "./facade";
 import { makeTemplate, mulberry32, templateGeometry } from "./props";
 import type { Road, World } from "./world";
 
@@ -135,13 +136,14 @@ export class Traffic {
       if (r.cls >= 1 && r.cls <= 6) this.addEdge(r, this.vehicleEdges, this.vNodes);
       if (r.cls >= 3 && r.cls <= 9) this.addEdge(r, this.walkEdges, this.wNodes);
     }
-    const mat = new THREE.MeshBasicMaterial({ vertexColors: true, fog: true });
+    const mat = createVertexColorMaterial(0.55, 0.15);
     const scale = budget.vehicles / VEHICLE_KINDS.reduce((s, k) => s + k.max, 0);
     VEHICLE_KINDS.forEach((k, kind) => {
       const n = Math.max(1, Math.round(k.max * scale));
       const mesh = new THREE.InstancedMesh(templateGeometry(k.tpl), mat, n);
       mesh.count = 0;
       mesh.frustumCulled = false;
+      mesh.castShadow = true;
       this.vMeshes.push(mesh);
       this.group.add(mesh);
       for (let i = 0; i < n; i++) this.vehicles.push(this.blankAgent(kind));
@@ -150,6 +152,7 @@ export class Traffic {
       const mesh = new THREE.InstancedMesh(templateGeometry(tpl), mat, budget.walkers);
       mesh.count = 0;
       mesh.frustumCulled = false;
+      mesh.castShadow = true;
       this.wMeshes.push(mesh);
       this.group.add(mesh);
     });

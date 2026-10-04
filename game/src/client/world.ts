@@ -1,5 +1,5 @@
-import * as THREE from "three";
-import { createWorldMaterial, FACADE_GROUND, FACADE_KERB, FACADE_PLAIN, FACADE_ROAD, FACADE_ROAD_LINED } from "./facade";
+import * as THREE from "three/webgpu";
+import { createWorldMaterial, FACADE_FLAT_ROOF, FACADE_GROUND, FACADE_KERB, FACADE_PLAIN, FACADE_ROAD, FACADE_ROAD_LINED, FACADE_ZINC } from "./facade";
 import { placeProps, TEMPLATES, type Template } from "./props";
 
 // Loads a baked world tile (see tools/bake/bake_world.py) and builds cheap
@@ -50,12 +50,11 @@ const ZINC_ROOFS = [0x8f6b50, 0xa6795a, 0x7c7f83, 0x6f5e50, 0x9a8f80];
 const FLAT_ROOFS = [0xbdb5a6, 0xa8a196, 0xcfc6b4];
 
 const ROAD_COLORS: Record<number, number> = {
-  1: 0x45464b, 2: 0x47484d, 3: 0x4a4b50, 4: 0x4d4e52, 5: 0x535355, 6: 0x5d5a57,
-  7: 0x67615b, 8: 0x9c7f5f, 9: 0xa48c6c, 10: 0x5b4a3c, 11: 0x3f7d8b,
+  1: 0x6a6b70, 2: 0x6c6d72, 3: 0x6f7075, 4: 0x727377, 5: 0x78787a, 6: 0x817d79,
+  7: 0x8a837c, 8: 0xa98a68, 9: 0xb19876, 10: 0x6b5a4a, 11: 0x3f7d8b,
 };
 const AREA_COLORS: Record<number, number> = { 1: 0x3f7d8b, 2: 0x7ea35a, 3: 0x6b9d4c, 4: 0xb6ab98 };
 const GROUND = 0xc8b38c;
-const SUN = new THREE.Vector3(-0.45, 0.8, -0.35).normalize();
 
 /** Road classes 1-5 (motorway..tertiary) get kerbs and shopfronts; 1-4 get centre lines. */
 const MAJOR = 5;
@@ -172,6 +171,8 @@ export class World {
     for (const b of chunkBuilders.values()) {
       const mesh = new THREE.Mesh(b.geometry(), mat);
       mesh.matrixAutoUpdate = false;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
       this.chunks.push(mesh);
       this.group.add(mesh);
     }
@@ -181,6 +182,7 @@ export class World {
     ground.groundQuad(gw / 2, gd / 2, GROUND);
     const groundMesh = new THREE.Mesh(ground.geometry(), mat);
     groundMesh.renderOrder = -1;
+    groundMesh.receiveShadow = true;
     this.group.add(groundMesh);
   }
 
@@ -388,14 +390,18 @@ export class World {
 class Builder {
   pos: number[] = [];
   col: number[] = [];
+  nrm: number[] = [];
   fac: number[] = [];
   idx: number[] = [];
   private c = new THREE.Color();
+  /** Normal for subsequent vertices (walls set their own; everything else faces up). */
+  private n = [0, 1, 0];
 
-  private vert(x: number, y: number, z: number, color: THREE.Color, shade: number, u = 0, fy = 0, code = FACADE_PLAIN, light = 1) {
+  private vert(x: number, y: number, z: number, color: THREE.Color, shade: number, u = 0, fy = 0, code = FACADE_PLAIN, ao = 1) {
     this.pos.push(x, y, z);
     this.col.push(color.r * shade, color.g * shade, color.b * shade);
-    this.fac.push(u, fy, code, light);
+    this.nrm.push(this.n[0], this.n[1], this.n[2]);
+    this.fac.push(u, fy, code, ao);
     return this.pos.length / 3 - 1;
   }
 
@@ -414,13 +420,13 @@ class Builder {
       const nl = Math.hypot(nx, nz) || 1;
       nx /= nl;
       nz /= nl;
-      const lit = 0.62 + 0.38 * Math.max(0, nx * SUN.x + nz * SUN.z);
+      this.n = [nx, 0, nz];
       // Facade code: seed in [0,1); +2 marks a ground-floor shopfront wall.
       const code = facadeSeed + (len > 2.5 && shopFront((ax + bx) / 2, (az + bz) / 2) ? 2 : 0);
-      const a = this.vert(ax, 0, az, wall, 1, u, 0, code, lit);
-      const b = this.vert(bx, 0, bz, wall, 1, u + len, 0, code, lit);
-      const c = this.vert(bx, h, bz, wall, 1, u + len, h, code, lit);
-      const d = this.vert(ax, h, az, wall, 1, u, h, code, lit);
+      const a = this.vert(ax, 0, az, wall, 1, u, 0, code);
+      const b = this.vert(bx, 0, bz, wall, 1, u + len, 0, code);
+      const c = this.vert(bx, h, bz, wall, 1, u + len, h, code);
+      const d = this.vert(ax, h, az, wall, 1, u, h, code);
       this.idx.push(a, c, b, a, d, c);
       u += len;
     }
@@ -428,11 +434,14 @@ class Builder {
     for (let i = 0; i < n; i++) contour.push(new THREE.Vector2(pts[i * 2], pts[i * 2 + 1]));
     const tris = THREE.ShapeUtils.triangulateShape(contour, []);
     const base = this.pos.length / 3;
-    for (let i = 0; i < n; i++) this.vert(pts[i * 2], h, pts[i * 2 + 1], roof, 0.95);
+    this.n = [0, 1, 0];
+    const roofCode = h > 9 ? FACADE_FLAT_ROOF : FACADE_ZINC;
+    for (let i = 0; i < n; i++) this.vert(pts[i * 2], h, pts[i * 2 + 1], roof, 1, 0, 0, roofCode);
     for (const t of tris) this.idx.push(base + t[0], base + t[2], base + t[1]);
   }
 
   ribbon(ax: number, az: number, bx: number, bz: number, w: number, y: number, hex: number, code: number, u0: number) {
+    this.n = [0, 1, 0];
     const dx = bx - ax, dz = bz - az;
     const len = Math.hypot(dx, dz) || 1;
     const px = (-dz / len) * (w / 2), pz = (dx / len) * (w / 2);
@@ -450,6 +459,7 @@ class Builder {
 
   /** Thin painted kerb strip along one road edge (offset > 0 = left of travel). */
   kerb(ax: number, az: number, bx: number, bz: number, offset: number, y: number, u0: number) {
+    this.n = [0, 1, 0];
     const dx = bx - ax, dz = bz - az;
     const len = Math.hypot(dx, dz) || 1;
     const nx = -dz / len, nz = dx / len;
@@ -464,6 +474,7 @@ class Builder {
   }
 
   flat(pts: Float32Array, y: number, hex: number) {
+    this.n = [0, 1, 0];
     const n = pts.length / 2;
     const contour: THREE.Vector2[] = [];
     for (let i = 0; i < n; i++) contour.push(new THREE.Vector2(pts[i * 2], pts[i * 2 + 1]));
@@ -475,6 +486,7 @@ class Builder {
   }
 
   groundQuad(hx: number, hz: number, hex: number) {
+    this.n = [0, 1, 0];
     const c = this.c.setHex(hex);
     const a = this.vert(-hx, 0, -hz, c, 1, 0, 0, FACADE_GROUND);
     const b = this.vert(hx, 0, -hz, c, 1, 0, 0, FACADE_GROUND);
@@ -492,6 +504,8 @@ class Builder {
       const px = t.pos[i * 3] * s, py = t.pos[i * 3 + 1] * s, pz = t.pos[i * 3 + 2] * s;
       this.pos.push(x + px * cos + pz * sin, py + y, z - px * sin + pz * cos);
       this.col.push(t.col[i * 3], t.col[i * 3 + 1], t.col[i * 3 + 2]);
+      const nx = t.nrm[i * 3], ny = t.nrm[i * 3 + 1], nz = t.nrm[i * 3 + 2];
+      this.nrm.push(nx * cos + nz * sin, ny, -nx * sin + nz * cos);
       this.fac.push(0, 0, FACADE_PLAIN, 1);
       this.idx.push(base + i);
     }
@@ -501,6 +515,7 @@ class Builder {
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.Float32BufferAttribute(this.pos, 3));
     g.setAttribute("color", new THREE.Float32BufferAttribute(this.col, 3));
+    g.setAttribute("normal", new THREE.Float32BufferAttribute(this.nrm, 3));
     g.setAttribute("facade", new THREE.Float32BufferAttribute(this.fac, 4));
     const nverts = this.pos.length / 3;
     g.setIndex(nverts > 65535 ? new THREE.Uint32BufferAttribute(this.idx, 1) : new THREE.Uint16BufferAttribute(this.idx, 1));

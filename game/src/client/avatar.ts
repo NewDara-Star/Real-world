@@ -1,4 +1,4 @@
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 
 // A low-poly person built from boxes: about 150 triangles and five draw calls.
 // Lighting is baked into vertex colours so it shares the world's unlit look.
@@ -6,11 +6,10 @@ import * as THREE from "three";
 const SKINS = [0x5b3a29, 0x6b4430, 0x7a4e36, 0x8d5b3e, 0x4a2f22, 0x9b6a4a];
 const TROUSERS = [0x2b2d42, 0x3d405b, 0x1f1f1f, 0x4b3f2f, 0x5c677d];
 const HAIR = [0x111111, 0x1b1410, 0x2a1d14];
-const SUN = new THREE.Vector3(-0.45, 0.8, -0.35).normalize();
 
 const shared = new Map<string, THREE.BufferGeometry>();
-const material = new THREE.MeshBasicMaterial({ vertexColors: true, fog: true });
-const shadowMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false, fog: true });
+const material = new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.85 });
+const shadowMat = new THREE.MeshBasicNodeMaterial({ color: 0x000000, transparent: true, opacity: 0.18, depthWrite: false });
 const shadowGeo = new THREE.CircleGeometry(0.42, 12).rotateX(-Math.PI / 2);
 
 /** Box with per-face baked shading, translated so its pivot is at the top centre. */
@@ -20,17 +19,10 @@ function shadedBox(w: number, h: number, d: number, hex: number, pivotTop: boole
   if (hit) return hit;
   const g = new THREE.BoxGeometry(w, h, d).toNonIndexed();
   if (pivotTop) g.translate(0, -h / 2, 0);
-  const n = g.getAttribute("normal");
   const base = new THREE.Color(hex);
   const cols: number[] = [];
-  const v = new THREE.Vector3();
-  for (let i = 0; i < n.count; i++) {
-    v.fromBufferAttribute(n, i);
-    const lit = 0.6 + 0.4 * Math.max(0, v.dot(SUN));
-    cols.push(base.r * lit, base.g * lit, base.b * lit);
-  }
+  for (let i = 0; i < g.getAttribute("position").count; i++) cols.push(base.r, base.g, base.b);
   g.setAttribute("color", new THREE.Float32BufferAttribute(cols, 3));
-  g.deleteAttribute("normal");
   g.deleteAttribute("uv");
   shared.set(key, g);
   return g;
@@ -69,6 +61,9 @@ export class Avatar {
     const shadow = new THREE.Mesh(shadowGeo, shadowMat);
     shadow.position.y = 0.06;
     this.root.add(this.legL, this.legR, this.armL, this.armR, shadow);
+    this.root.traverse((o) => {
+      if (o instanceof THREE.Mesh && o !== shadow) o.castShadow = true;
+    });
   }
 
   /** speed in m/s drives the walk cycle. */
@@ -89,11 +84,14 @@ export class Avatar {
 function mergeInto(target: THREE.BufferGeometry, parts: THREE.BufferGeometry[]) {
   const pos: number[] = [];
   const col: number[] = [];
+  const nrm: number[] = [];
   for (const p of parts) {
     pos.push(...(p.getAttribute("position").array as Float32Array));
     col.push(...(p.getAttribute("color").array as Float32Array));
+    nrm.push(...(p.getAttribute("normal").array as Float32Array));
   }
   target.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
   target.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+  target.setAttribute("normal", new THREE.Float32BufferAttribute(nrm, 3));
   target.computeBoundingSphere();
 }

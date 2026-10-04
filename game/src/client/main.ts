@@ -1,5 +1,7 @@
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import { StreetAudio } from "./audio";
+import { Graphics, type Quality } from "./graphics";
+import { createVertexColorMaterial } from "./facade";
 import { Avatar } from "./avatar";
 import { Input } from "./input";
 import { Net } from "./net";
@@ -17,7 +19,6 @@ import { G29 } from "./g29";
 const params = new URLSearchParams(location.search);
 const DEBUG = params.has("debug");
 const ZONE = "yaba";
-const HAZE = 0xe9dcc4;
 const WALK = 2.6;
 const RUN = 5.6;
 const RADIUS = 0.35;
@@ -28,31 +29,20 @@ const canvas = $<HTMLCanvasElement>("view");
 
 const webgl = hasWebGL();
 if (!webgl) {
-  $("joinnote").textContent =
-    "Your browser can't show 3D. If you're on Opera Mini, open this link in Chrome. 🙏🏾";
+  $("joinnote").textContent = "Your browser can't show 3D. Open this link in Chrome or Edge on a computer. 🙏🏾";
 }
 
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: !isTouch, powerPreference: "high-performance" });
-const maxRatio = Math.min(devicePixelRatio, isTouch ? 1.5 : 2);
-let pixelRatio = Math.min(maxRatio, isTouch ? 1 : 1.5);
-renderer.setPixelRatio(pixelRatio);
-renderer.setSize(innerWidth, innerHeight);
-
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(HAZE);
-let fogFar = isTouch ? 260 : 340;
-scene.fog = new THREE.Fog(HAZE, 50, fogFar);
-const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.3, 600);
-
-addEventListener("resize", () => {
-  renderer.setSize(innerWidth, innerHeight);
-  camera.aspect = innerWidth / innerHeight;
-  camera.updateProjectionMatrix();
-});
+// Desktop-first high-end renderer (WebGPU, falls back to WebGL2).
+const gfx = new Graphics(canvas);
+const QUALITY = (params.get("quality") as Quality) || "high";
+await gfx.init(QUALITY);
+const renderer = gfx.renderer;
+const scene = gfx.scene;
+const camera = gfx.camera;
+let fogFar = gfx.fogFar;
 
 const world = new World();
 scene.add(world.group);
-scene.add(makeSky());
 let traffic: Traffic | null = null;
 const audio = new StreetAudio();
 
@@ -93,7 +83,7 @@ interface Bubble {
   until: number;
 }
 const remotes = new Map<number, Remote>();
-const VEHICLE_MAT = new THREE.MeshBasicMaterial({ vertexColors: true, fog: true });
+const VEHICLE_MAT = createVertexColorMaterial(0.55, 0.15);
 const DANFO_GEO = templateGeometry(danfoTemplate());
 const carGeos = new Map<number, THREE.BufferGeometry>();
 function remoteCarGeo(color: number) {
@@ -206,7 +196,8 @@ world
     const spot = world.findOpen(world.meta.spawn.x + rand(-6, 6), world.meta.spawn.z + rand(-6, 6));
     me.pos.set(spot.x, 0, spot.z);
     placeCamera(1);
-    renderer.render(scene, camera);
+    gfx.follow(me.pos.x, me.pos.z);
+    gfx.render();
   })
   .catch((e) => {
     enterBtn.textContent = "Couldn't load Lagos. Refresh 🙏🏾";
@@ -519,7 +510,8 @@ function frame(now: number) {
   }
   placeCamera(dt);
   world.cull(me.pos.x, me.pos.z, fogFar);
-  renderer.render(scene, camera);
+  gfx.follow(me.pos.x, me.pos.z);
+  gfx.render();
   updateLabels(now);
 
   hudTimer -= dt;
@@ -537,7 +529,7 @@ function frame(now: number) {
     if (DEBUG) {
       const info = renderer.info.render;
       $("debug").textContent =
-        `${fps.toFixed(0)} fps  ratio ${pixelRatio.toFixed(2)}  fog ${fogFar}\n` +
+        `${fps.toFixed(0)} fps  ${gfx.backend} ${gfx.quality} x${gfx.pixelRatio}  fog ${fogFar}\n` +
         `${info.calls} draws  ${(info.triangles / 1000).toFixed(0)}k tris\n` +
         `net in ${((net.bytesIn * 8) / fpsTime / 1000).toFixed(1)} kbps  out ${((net.bytesOut * 8) / fpsTime / 1000).toFixed(1)} kbps\n` +
         `players ${remotes.size + 1}  layer ${net.layer}`;
@@ -577,17 +569,15 @@ function placeCamera(dt: number) {
   camera.lookAt(me.pos.x, 1.5, me.pos.z);
 }
 
-/** Trade resolution and draw distance for frame rate on weak phones. */
+/** Step quality down if the machine can't hold a smooth frame rate. */
 function adaptQuality(f: number) {
-  if (f < 26 && pixelRatio > 0.55) {
-    pixelRatio = Math.max(0.55, pixelRatio - 0.15);
-    fogFar = Math.max(160, fogFar - 40);
-  } else if (f > 55 && pixelRatio < maxRatio) {
-    pixelRatio = Math.min(maxRatio, pixelRatio + 0.1);
-    fogFar = Math.min(isTouch ? 300 : 380, fogFar + 20);
-  } else return;
-  renderer.setPixelRatio(pixelRatio);
-  (scene.fog as THREE.Fog).far = fogFar;
+  if (params.has("quality")) return; // player picked explicitly
+  if (f < 40 && gfx.quality === "ultra") gfx.setQuality("high");
+  else if (f < 32 && gfx.quality === "high") gfx.setQuality("medium");
+  else if (f < 24 && fogFar > 320) {
+    fogFar -= 80;
+    gfx.setFogFar(fogFar);
+  }
 }
 
 // -------------------------------------------------------------- driving ----
@@ -778,24 +768,6 @@ $("wheel-setup").addEventListener("click", async () => {
 });
 
 // ---------------------------------------------------------------- utils ----
-
-/** Harmattan sky: hazy horizon fading to a pale blue zenith. Follows the camera. */
-function makeSky(): THREE.Mesh {
-  const geo = new THREE.SphereGeometry(520, 16, 10);
-  const pos = geo.getAttribute("position");
-  const cols: number[] = [];
-  const horizon = new THREE.Color(HAZE), zenith = new THREE.Color(0xa9c3d8), c = new THREE.Color();
-  for (let i = 0; i < pos.count; i++) {
-    const k = Math.max(0, pos.getY(i) / 520);
-    c.copy(horizon).lerp(zenith, Math.pow(k, 0.6));
-    cols.push(c.r, c.g, c.b);
-  }
-  geo.setAttribute("color", new THREE.Float32BufferAttribute(cols, 3));
-  const sky = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false }));
-  sky.renderOrder = -2;
-  sky.onBeforeRender = (_r, _s, cam) => sky.position.copy(cam.position);
-  return sky;
-}
 
 function updateOnline() {
   $("online").textContent = `● ${online} in Yaba`;

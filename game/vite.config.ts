@@ -5,5 +5,5 @@ export default defineConfig({
     host: true,
     proxy: { "/ws": { target: "ws://127.0.0.1:8787", ws: true } },
   },
-  build: { target: "es2020", chunkSizeWarningLimit: 900 },
+  build: { target: "es2022", chunkSizeWarningLimit: 2000 },
 });

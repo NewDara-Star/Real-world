@@ -1,4 +1,4 @@
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import type { World } from "./world";
 import { pointInPoly } from "./world";
 
@@ -9,16 +9,16 @@ import { pointInPoly } from "./world";
 export interface Template {
   pos: Float32Array;
   col: Float32Array;
+  nrm: Float32Array;
 }
-
-const SUN = new THREE.Vector3(-0.45, 0.8, -0.35).normalize();
 
 type Part = [THREE.BufferGeometry, number];
 
-/** Merge coloured parts into one template with baked sun shading. */
+/** Merge coloured parts into one template (flat-shaded normals; lit by the real sun). */
 export function makeTemplate(parts: Part[]): Template {
   const pos: number[] = [];
   const col: number[] = [];
+  const nrm: number[] = [];
   const n = new THREE.Vector3();
   const c = new THREE.Color();
   for (const [geo, hex] of parts) {
@@ -30,17 +30,18 @@ export function makeTemplate(parts: Part[]): Template {
     for (let i = 0; i < p.count; i++) {
       pos.push(p.getX(i), p.getY(i), p.getZ(i));
       n.fromBufferAttribute(nm, i);
-      const lit = 0.62 + 0.38 * Math.max(0, n.dot(SUN)) + 0.08 * Math.max(0, n.y);
-      col.push(c.r * lit, c.g * lit, c.b * lit);
+      nrm.push(n.x, n.y, n.z);
+      col.push(c.r, c.g, c.b);
     }
   }
-  return { pos: new Float32Array(pos), col: new Float32Array(col) };
+  return { pos: new Float32Array(pos), col: new Float32Array(col), nrm: new Float32Array(nrm) };
 }
 
 export function templateGeometry(t: Template): THREE.BufferGeometry {
   const g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.BufferAttribute(t.pos, 3));
   g.setAttribute("color", new THREE.BufferAttribute(t.col, 3));
+  g.setAttribute("normal", new THREE.BufferAttribute(t.nrm, 3));
   g.computeBoundingSphere();
   return g;
 }

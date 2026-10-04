@@ -1,4 +1,5 @@
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
+import { createVertexColorMaterial } from "./facade";
 import { templateGeometry, makeTemplate } from "./props";
 import { carTemplate, danfoTemplate } from "./traffic";
 import type { DriveInput } from "./wheel";
@@ -64,9 +65,11 @@ export class PlayerVehicle {
     this.x = x;
     this.z = z;
     this.yaw = yaw;
-    const mat = new THREE.MeshBasicMaterial({ vertexColors: true, fog: true });
+    const mat = createVertexColorMaterial(0.55, 0.15);
     this.body = new THREE.Group();
-    this.body.add(new THREE.Mesh(templateGeometry(kind === "danfo" ? danfoTemplate() : carTemplate(0x1f9d55)), mat));
+    const bodyMesh = new THREE.Mesh(templateGeometry(kind === "danfo" ? danfoTemplate() : carTemplate(0x1f9d55)), mat);
+    bodyMesh.castShadow = true;
+    this.body.add(bodyMesh);
     this.root.add(this.body);
 
     // Minimal interior for the cockpit camera: dashboard and a steering wheel
