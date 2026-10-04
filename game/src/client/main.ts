@@ -11,6 +11,7 @@ import { Traffic } from "./traffic";
 import { NetTraffic } from "./trafficnet";
 import { RoadSigns } from "./roadsigns";
 import { ALLOW_CAR, LaneKind } from "./roadnet";
+import { Examiner, type Fault } from "./rules";
 import { World, type Place } from "./world";
 import { FLAG_DANFO, FLAG_DRIVING, FLAG_MOVING, FLAG_RUNNING, type MoveState, type PlayerInfo } from "../shared/protocol";
 import { PlayerVehicle, type VehicleKind } from "./drive";
@@ -65,6 +66,7 @@ const world = new World(CITY);
 scene.add(world.group);
 let traffic: Traffic | NetTraffic | null = null;
 let signs: RoadSigns | null = null;
+let examiner: Examiner | null = null;
 const audio = new StreetAudio();
 
 const me = {
@@ -231,6 +233,10 @@ world
     if (world.net) {
       signs = new RoadSigns(world.net, CITY.drive);
       scene.add(signs.group);
+      if (traffic instanceof NetTraffic) {
+        examiner = new Examiner(world.net, traffic);
+        examiner.onFault = showFault;
+      }
     }
     scene.add(traffic.group);
     scene.add(createLightPools(world.lamps));
@@ -672,6 +678,10 @@ function enterVehicle(kind: VehicleKind) {
   $("drive-car").hidden = $("drive-danfo").hidden = true;
   $("drive-exit").hidden = false;
   $("speedo").hidden = false;
+  if (examiner) {
+    $("exam").hidden = false;
+    updateTally();
+  }
   headYaw = headTarget = 0;
   if (drive.needsCalibration()) toast("Wheel detected 🎮 tap Wheel setup to calibrate it");
   else if (g29.connected || drive.wheelPad()) toast("In P with the parking brake on. Brake, right paddle to D, then gas. Left paddle goes back toward R and P");
@@ -725,6 +735,7 @@ function exitVehicle() {
   $("drive-car").hidden = $("drive-danfo").hidden = false;
   $("drive-exit").hidden = true;
   $("speedo").hidden = true;
+  $("exam").hidden = true;
 }
 
 function driveFrame(dt: number, now: number) {
@@ -747,16 +758,30 @@ function driveFrame(dt: number, now: number) {
   if (c.wiped) audio.wipe();
   // Passenger mirror is ~55 degrees across the car; a glance turns the eyes most of the way.
   headTarget = inp.lookBack ? -c.seat * 2.45 : inp.glance ? -c.seat * 0.85 : -inp.look * 1.35;
+  if (examiner) {
+    // Observations: what the driver's head (or mouse look) actually checked.
+    const looking = headYaw + lookOffset;
+    if (inp.glance || (looking > 0.6 && looking < 1.1 && c.seat < 0) || (looking < -0.6 && looking > -1.1 && c.seat > 0)) examiner.observe("mirror");
+    if (inp.look < -0.5 || looking > 1.1) examiner.observe("left");
+    if (inp.look > 0.5 || looking < -1.1) examiner.observe("right");
+    if (inp.lookBack) examiner.observe("back");
+    examiner.update(dt, { x: c.x, z: c.z, yaw: c.yaw, vf: c.vf, indicator: c.indicator, hazards: c.hazards, selector: c.selector });
+  }
 
+  let hitKind = "wall";
   if (traffic) {
     const fx = Math.sin(c.yaw), fz = Math.cos(c.yaw);
     const r = c.spec.width / 2;
     for (const o of [c.spec.length / 2 - r, -(c.spec.length / 2 - r)]) {
       const hit = traffic.collide(c.x + fx * o, c.z + fz * o, r);
-      if (hit) c.bump(hit.nx, hit.nz, hit.depth);
+      if (hit) {
+        c.bump(hit.nx, hit.nz, hit.depth);
+        hitKind = hit.kind;
+      }
     }
   }
   if (c.impact > 1.5 && crashCooldown <= 0) {
+    examiner?.collision(hitKind, c.impact);
     audio.crash(Math.min(1, c.impact / 14));
     crashCooldown = 0.4;
     // Jolt the wheel away from the side that hit.
@@ -794,8 +819,28 @@ function driveFrame(dt: number, now: number) {
   updateHeadlights(c);
 }
 
+/** Examiner panel: newest fault on top, older ones fade. */
+function showFault(f: Fault) {
+  const feed = $("ex-feed");
+  const li = document.createElement("li");
+  li.className = `g${f.grade}`;
+  li.textContent = `${["", "Minor", "Serious", "Dangerous"][f.grade]}: ${f.text}`;
+  feed.prepend(li);
+  while (feed.children.length > 5) feed.lastElementChild?.remove();
+  setTimeout(() => li.classList.add("old"), 8000);
+  updateTally();
+}
+function updateTally() {
+  if (!examiner) return;
+  const v = examiner.verdict();
+  $("ex-tally").innerHTML = `G1 ${v.g1} · G2 ${v.g2} · G3 ${v.g3} <span class="${v.pass ? "pass" : "fail"}">${v.pass ? "PASS" : "FAIL"}</span>`;
+}
+
 /** Selector strip, indicator arrows and tell-tales on the speedo. */
 function updateDash(c: PlayerVehicle) {
+  const lim = examiner?.limit ?? 0;
+  $("limit").hidden = !lim;
+  if (lim) $("limit").textContent = String(lim);
   for (const el of document.querySelectorAll<HTMLElement>("#prnd b")) el.classList.toggle("on", el.dataset.g === c.selector);
   const left = c.blinkOn && (c.indicator === -1 || c.hazards);
   const right = c.blinkOn && (c.indicator === 1 || c.hazards);

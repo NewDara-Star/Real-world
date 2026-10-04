@@ -158,3 +158,25 @@ body.cockpit #speedo { right: 50%; transform: translateX(50%); bottom: 14px; }
 .wm-raw { font: 11px/1.3 ui-monospace, monospace; opacity: 0.7; margin: 6px 0; word-break: break-all; }
 .wm-swap { display: block; margin: 6px 0; font-weight: 600; }
 .wm-tip { margin: 6px 0 0; font-size: 11px; opacity: 0.8; }
+
+/* Speed-limit disc, Irish style: red ring, black number. */
+#speedo #limit {
+  font-style: normal; font-weight: 800; font-size: 13px; color: #111; background: #fff;
+  border: 4px solid #c8202a; border-radius: 50%; width: 34px; height: 34px; display: grid; place-items: center; margin-left: 6px;
+}
+#speedo #limit[hidden] { display: none; }
+#exam {
+  position: fixed; left: 10px; top: 56px; width: min(330px, 80vw); pointer-events: none;
+  background: rgba(20, 18, 16, 0.72); color: #fff; border-radius: 12px; padding: 8px 10px; font-size: 13px;
+}
+#exam[hidden] { display: none; }
+#exam .ex-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+#ex-tally { font-variant-numeric: tabular-nums; opacity: 0.9; }
+#ex-tally .fail { color: #ff6b5e; font-weight: 700; }
+#ex-tally .pass { color: #7be38a; font-weight: 700; }
+#ex-feed { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+#ex-feed li { padding: 3px 6px; border-radius: 6px; border-left: 4px solid; background: rgba(255, 255, 255, 0.06); transition: opacity 0.6s; }
+#ex-feed li.g1 { border-color: #f2c94c; }
+#ex-feed li.g2 { border-color: #f2994a; }
+#ex-feed li.g3 { border-color: #eb5757; background: rgba(235, 87, 87, 0.18); }
+#ex-feed li.old { opacity: 0.45; }

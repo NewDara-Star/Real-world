@@ -257,6 +257,38 @@ export class NetTraffic {
     return best;
   }
 
+  /**
+   * Would entering link L now cut up AI traffic it must give way to? Only AI
+   * vehicles count (this is the examiner asking about the player).
+   */
+  yieldConflict(L: Link, horizon: number): boolean {
+    const net = this.net;
+    if (L.j < 0 || L.req < 0) return false;
+    const J = net.junctions[L.j];
+    for (let k = 0; k < J.links.length; k++) {
+      if (k === L.req || J.links[k] < 0 || !net.yieldsTo(L.j, L.req, k)) continue;
+      const ol = net.links[J.links[k]];
+      if (net.lanes[ol.to].kind === LaneKind.Crossing) continue;
+      if (ol.vias.some((v) => (this.onLane.get(v)?.length ?? 0) > 0)) return true;
+      if ((this.approach.get(ol.id) ?? 99) < horizon) return true;
+    }
+    return false;
+  }
+
+  /** Is someone on a crossing that link L drives across? */
+  pedInPath(L: Link): boolean {
+    const net = this.net;
+    if (L.j < 0 || L.req < 0) return false;
+    const J = net.junctions[L.j];
+    for (let k = 0; k < J.links.length; k++) {
+      if (k === L.req || J.links[k] < 0) continue;
+      const ol = net.links[J.links[k]];
+      if (net.lanes[ol.to].kind !== LaneKind.Crossing) continue;
+      if ((net.foes(L.j, L.req, k) || net.yieldsTo(L.j, L.req, k)) && this.pedOnCrossing(ol.to)) return true;
+    }
+    return false;
+  }
+
   /** Is anyone on (or stepping onto) this crossing lane? */
   pedOnCrossing(lane: number) {
     return (this.pedsOn.get(lane) ?? 0) > 0;
