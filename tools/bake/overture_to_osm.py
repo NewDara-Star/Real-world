@@ -1,7 +1,8 @@
 """Rebuild an OSM XML file from Overture transportation + infrastructure.
 
-Overture is derived from OSM, but no OSM extract host is reachable from the
-build machine, so this turns the Overture parquet extracts back into the OSM
+The fallback when no OSM source answers (osm_fetch.py exits 3). Overture is
+derived from OSM but drops lane counts, turn lanes and roundabouts; this turns
+the Overture parquet extracts back into the OSM
 shape that SUMO's netconvert understands: ways with highway/oneway/maxspeed
 tags, nodes tagged traffic_signals / crossing / stop / give_way, and turn
 restriction relations. netconvert then does the hard part (lanes, junction

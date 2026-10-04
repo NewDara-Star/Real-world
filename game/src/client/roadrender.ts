@@ -136,6 +136,19 @@ export function buildRoadNet(net: RoadNet, bf: BuilderFor, drive: "left" | "righ
     const b = bf(j.x, j.z);
     b.n = [0, 1, 0];
     fillPoly(b, j.shape, ROAD_Y, ASPHALT, FACADE_ROAD);
+    // A mini-roundabout is a white painted circle in the middle of the
+    // junction (Traffic Signs Manual: 1-4 m across, sized to the junction).
+    if (j.mini) {
+      let rad = 0;
+      for (let k = 0; k < j.shape.length; k += 2) rad += Math.hypot(j.shape[k] - j.x, j.shape[k + 1] - j.z);
+      rad = Math.max(0.9, Math.min(2, (rad / (j.shape.length / 2)) * 0.3));
+      const ring = new Float32Array(48);
+      for (let k = 0; k < 24; k++) {
+        ring[k * 2] = j.x + Math.cos((k / 24) * Math.PI * 2) * rad;
+        ring[k * 2 + 1] = j.z + Math.sin((k / 24) * Math.PI * 2) * rad;
+      }
+      fillPoly(b, ring, ROAD_Y + PAINT * 2, WHITE, FACADE_PLAIN);
+    }
   }
 
   for (const l of net.lanes) {

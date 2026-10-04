@@ -8,8 +8,10 @@
       --tz Europe/Dublin --spawn "Ballymun"           # add a new place
 
 Steps: Overture extracts for the bbox -> bake_world (buildings, roads, areas)
--> OSM rebuild + SUMO netconvert + bake_net (lanes, junction rules, signals)
--> game/public/world/places.json, which the world map reads.
+-> real OSM roads (osm_fetch: lanes, turn lanes, roundabouts, limits), or if
+no OSM source answers, an OSM rebuild from Overture (no lanes or roundabouts)
+-> SUMO netconvert + mini-roundabout pass + bake_net (lanes, junction rules,
+signals) -> game/public/world/places.json, which the world map reads.
 
 Place definitions live in tools/bake/places.json so every place can be rebuilt.
 """
@@ -60,8 +62,14 @@ def bake(name, p, net_only=False, refetch=False):
             "--prefix", f"{name}/{name}_overture", "--bbox", *[str(v) for v in p["bbox"]], "--spawn-place", p.get("spawn", ""))
     osm = os.path.join(d, f"{name}.osm")
     netxml = os.path.join(d, f"{name}.net.xml")
-    run("python3", os.path.join(BAKE, "overture_to_osm.py"), os.path.join(d, "ov_segment.parquet") if os.path.exists(os.path.join(d, "ov_segment.parquet")) else os.path.join(d, f"{name}_overture_segment.parquet"),
-        os.path.join(d, "ov_infrastructure.parquet"), os.path.join(d, "ov_connector.parquet"), osm)
+    # Real OSM first: it has lanes, turn lanes and roundabouts; Overture doesn't.
+    code = subprocess.run(["python3", os.path.join(BAKE, "osm_fetch.py"), *[str(v) for v in p["bbox"]], osm], cwd=ROOT).returncode
+    if code not in (0, 3):  # 3 means no source answered; anything else is a bug to fix, not a reason to quietly downgrade
+        sys.exit(f"osm_fetch.py failed (exit {code}); fix it rather than baking from Overture")
+    if code == 3:
+        print("! no OSM source answered: rebuilding roads from Overture (no lane counts, turn lanes or roundabouts)", file=sys.stderr)
+        run("python3", os.path.join(BAKE, "overture_to_osm.py"), os.path.join(d, "ov_segment.parquet") if os.path.exists(os.path.join(d, "ov_segment.parquet")) else os.path.join(d, f"{name}_overture_segment.parquet"),
+            os.path.join(d, "ov_infrastructure.parquet"), os.path.join(d, "ov_connector.parquet"), osm)
     run("sh", os.path.join(BAKE, "build_net.sh"), osm, netxml, p.get("drive", "right"))
     run("python3", os.path.join(BAKE, "bake_net.py"), netxml, osm, os.path.join(WORLD, f"{name}.json"), os.path.join(WORLD, f"{name}.net.bin"))
 

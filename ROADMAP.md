@@ -22,13 +22,16 @@ physics and the driver. `research/15-what-it-takes.md` is the full map.
    report rate, write latency and hands-off oscillation on the real wheel;
    then move the wheel into a worker at ~500 Hz with torque extrapolated
    between frames (research 11 §6).
-3. **Road data for Finglas** from OSM (Overpass): lane counts, turn lanes,
-   roundabouts and mini-roundabouts, speed limits. Our Overture network has
-   none of these (research 13). With it, Irish open records (research 17,
-   CC BY): Tailte Éireann buildings, GSI lidar heights per building, Dublin
-   City Council lamps, trees and signal sites (to check SUMO's signals).
-   data.gov.ie is blocked from the cloud sandbox, so those downloads run on
-   the owner's Mac.
+3. **Road data for Finglas.** Built: the network comes from real OSM (52
+   roundabout junctions, 24 mini-roundabouts as give-way-to-the-right
+   junctions with a painted circle, 228 multi-lane sections, 83 signals, real
+   limits); Overture is only the fallback. Still open:
+   - a test that watches AI cars yield to the right at a mini-roundabout;
+   - a drive through them on the Mac;
+   - the examiner's roundabout rules (item 4), roundabout arrows and markings;
+   - Irish open records (research 17, CC BY): Tailte Éireann buildings, GSI
+     lidar heights per building, Dublin City Council lamps, trees and signal
+     sites (to check SUMO's signals).
 4. **Examiner to the full RSA sheet:** 18 headings, tolerances and minimum
    durations, the real fail rule, an end-of-test report, then the three
    manoeuvres (reverse round a corner, turnabout, hill start) and a mock test

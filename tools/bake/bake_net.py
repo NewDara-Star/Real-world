@@ -73,6 +73,12 @@ for j in root.iter("junction"):
     junctions.append({"id": j.get("id"), "type": JTYPES.index(j.get("type")) if j.get("type") in JTYPES else 0,
                       "pos": pos, "shape": shp, "rows": rows, "int": (j.get("intLanes") or "").split()})
 
+# Roundabouts: SUMO lists each ring's junctions. Mini-roundabouts are single OSM
+# nodes; mini_roundabouts.py already made them give-way-to-the-right junctions.
+ring = {jid for r in root.iter("roundabout") for jid in r.get("nodes", "").split()}
+for j in junctions:
+    j["flags"] = 0x80 if j["id"] in ring else 0
+
 # ---- edges and lanes ----
 lanes, lindex, edges, eindex = [], {}, [], {}
 names, nindex = [], {}
@@ -234,6 +240,16 @@ for n in ET.parse(OSM).getroot().iter("node"):
         zebras += 1
 print(f"{zebras} marked crossings", file=sys.stderr)
 
+# ---- mini-roundabouts: the junctions mini_roundabouts.py made right_before_left ----
+# (One source of truth: that pass did the matching; netconvert is told not to
+# create right_before_left junctions itself, so the type alone marks them.)
+minis = 0
+for j in junctions:
+    if JTYPES[j["type"]] == "right_before_left":
+        j["flags"] |= 0x40
+        minis += 1
+print(f"{sum(1 for j in junctions if j['flags'] & 0x80)} roundabout junctions, {minis} mini-roundabouts", file=sys.stderr)
+
 # ---- write ----
 buf = bytearray(b"LNT1")
 buf += struct.pack("<H", len(names))
@@ -251,7 +267,7 @@ def pts(p):
 
 buf += struct.pack("<I", len(junctions))
 for j in junctions:
-    buf += struct.pack("<Bff", j["type"], *j["pos"]) + pts(j["shape"])
+    buf += struct.pack("<Bff", j["type"] | j["flags"], *j["pos"]) + pts(j["shape"])
     n = len(j["rows"])
     nb = (n + 7) // 8
     buf += struct.pack("<H", n)

@@ -54,7 +54,12 @@ export interface Edge {
   n: number;
 }
 export interface Junction {
+  /** SUMO junction type (index into JUNCTION_TYPES). */
   type: number;
+  /** On a roundabout's ring (SUMO lists the ring's junctions). */
+  roundabout: boolean;
+  /** A mini-roundabout: one painted circle, give way to the right. */
+  mini: boolean;
   x: number;
   z: number;
   shape: Float32Array;
@@ -135,7 +140,10 @@ export class RoadNet {
     }
     const nj = u32();
     for (let i = 0; i < nj; i++) {
-      const type = u8();
+      // Low 6 bits: the SUMO type; bit 7 roundabout, bit 6 mini-roundabout.
+      // (Files baked before these flags simply have them clear.)
+      const tb = u8();
+      const type = tb & 0x3f, roundabout = !!(tb & 0x80), mini = !!(tb & 0x40);
       const x = f32(), z = f32();
       const shape = pts();
       const nr = u16();
@@ -148,7 +156,7 @@ export class RoadNet {
         o += nb;
         o += 1; // cont
       }
-      this.junctions.push({ type, x, z, shape, resp, foes, links: new Array(nr).fill(-1) });
+      this.junctions.push({ type, roundabout, mini, x, z, shape, resp, foes, links: new Array(nr).fill(-1) });
     }
     const ne = u32();
     for (let i = 0; i < ne; i++) {
