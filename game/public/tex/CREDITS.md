@@ -1,0 +1,11 @@
+CC0 textures used in the city:
+- asphalt: asphalt_02 (Poly Haven, Rob Tuytel, CC0)
+- footpath: concrete_pavement (Poly Haven, Charlotte Baglioni, CC0)
+- brick: red_brick_03 (Poly Haven, Rob Tuytel, CC0)
+- render: white_plaster_rough_02 (Poly Haven, Rob Tuytel, CC0)
+- plaster: painted_plaster_wall (Poly Haven, Amal Kumar, CC0)
+- rooftile: grey_roof_tiles_02 (Poly Haven, Rob Tuytel, CC0)
+- zinc: corrugated_iron (Poly Haven, Jenelle van Heerden, Dimitrios Savva, CC0)
+- laterite: red_laterite_soil_stones (Poly Haven, Amal Kumar, CC0)
+- concrete: concrete (Poly Haven, Rob Tuytel, CC0)
+- grass: Grass004 (ambientCG, ambientCG, CC0)

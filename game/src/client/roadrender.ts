@@ -1,5 +1,5 @@
 import * as THREE from "three/webgpu";
-import { FACADE_PLAIN, FACADE_ROAD } from "./facade";
+import { FACADE_KERB, FACADE_PATH, FACADE_PLAIN, FACADE_ROAD } from "./facade";
 import { ALLOW_CAR, EDGE_CANONICAL, EDGE_GIVE_WAY, EDGE_STOP, EDGE_TWO_WAY, LaneKind, MARKED, type Lane, type RoadNet } from "./roadnet";
 import type { Builder } from "./world";
 
@@ -14,8 +14,8 @@ type BuilderFor = (x: number, z: number) => Builder;
 const ROAD_Y = 0.03;
 const PATH_Y = 0.15; // kerb height ~12 cm above the road
 const PAINT = 0.008;
-const ASPHALT = 0x5f6064;
-const PATH = 0x9e9b95;
+const ASPHALT = 0x85868a;
+const PATH = 0xaeaba4;
 const KERB = 0xb4b0a8;
 const WHITE = 0xe9e7e0;
 const YELLOW = 0xe0b62c;
@@ -43,10 +43,10 @@ function wall(b: Builder, ax: number, az: number, bx: number, bz: number, y0: nu
   const l = Math.hypot(dx, dz) || 1;
   b.n = [dz / l, 0, -dx / l];
   col.setHex(hex);
-  const i0 = b.vert(ax, y0, az, col, 0.9);
-  const i1 = b.vert(bx, y0, bz, col, 0.9);
-  const i2 = b.vert(bx, y1, bz, col, 1);
-  const i3 = b.vert(ax, y1, az, col, 1);
+  const i0 = b.vert(ax, y0, az, col, 0.9, 0, 0, FACADE_KERB);
+  const i1 = b.vert(bx, y0, bz, col, 0.9, l, 0, FACADE_KERB);
+  const i2 = b.vert(bx, y1, bz, col, 1, l, 0, FACADE_KERB);
+  const i3 = b.vert(ax, y1, az, col, 1, 0, 0, FACADE_KERB);
   b.idx.push(i0, i1, i2, i0, i2, i3, i0, i2, i1, i0, i3, i2);
 }
 
@@ -149,7 +149,7 @@ export function buildRoadNet(net: RoadNet, bf: BuilderFor, drive: "left" | "righ
         const on = net.locate(mx, mz, null, ALLOW_CAR);
         if (on && Math.abs(on.lat) < on.lane.width / 2) return;
         const b = bf(mx, mz);
-        quadUp(b, [ax + nx * hw, az + nz * hw, ax - nx * hw, az - nz * hw, bx - nx * hw, bz - nz * hw, bx + nx * hw, bz + nz * hw], PATH_Y, PATH, FACADE_PLAIN);
+        quadUp(b, [ax + nx * hw, az + nz * hw, ax - nx * hw, az - nz * hw, bx - nx * hw, bz - nz * hw, bx + nx * hw, bz + nz * hw], PATH_Y, PATH, FACADE_PATH);
         for (const s of [1, -1]) wall(b, ax + nx * hw * s, az + nz * hw * s, bx + nx * hw * s, bz + nz * hw * s, ROAD_Y, PATH_Y, KERB);
       });
     } else if (l.kind === LaneKind.WalkingArea && l.pts.length >= 6) {
@@ -160,7 +160,7 @@ export function buildRoadNet(net: RoadNet, bf: BuilderFor, drive: "left" | "righ
         cz += l.pts[i * 2 + 1];
       }
       const b = bf(cx / n, cz / n);
-      fillPoly(b, l.pts, PATH_Y, PATH, FACADE_PLAIN);
+      fillPoly(b, l.pts, PATH_Y, PATH, FACADE_PATH);
     } else if (l.kind === LaneKind.Crossing) {
       const signal = l.inc.some((k) => net.links[k].tl >= 0);
       if (signal) {

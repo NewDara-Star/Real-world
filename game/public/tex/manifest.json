@@ -1,0 +1,92 @@
+{
+ "asphalt": {
+  "metres": [
+   3.0,
+   3.0
+  ],
+  "source": "polyhaven",
+  "id": "asphalt_02",
+  "author": "Rob Tuytel"
+ },
+ "footpath": {
+  "metres": [
+   1.8,
+   1.8
+  ],
+  "source": "polyhaven",
+  "id": "concrete_pavement",
+  "author": "Charlotte Baglioni"
+ },
+ "brick": {
+  "metres": [
+   1.0,
+   1.0
+  ],
+  "source": "polyhaven",
+  "id": "red_brick_03",
+  "author": "Rob Tuytel"
+ },
+ "render": {
+  "metres": [
+   1.0,
+   1.0
+  ],
+  "source": "polyhaven",
+  "id": "white_plaster_rough_02",
+  "author": "Rob Tuytel"
+ },
+ "plaster": {
+  "metres": [
+   2.0,
+   2.0
+  ],
+  "source": "polyhaven",
+  "id": "painted_plaster_wall",
+  "author": "Amal Kumar"
+ },
+ "rooftile": {
+  "metres": [
+   1.5,
+   1.5
+  ],
+  "source": "polyhaven",
+  "id": "grey_roof_tiles_02",
+  "author": "Rob Tuytel"
+ },
+ "zinc": {
+  "metres": [
+   1.12,
+   1.12
+  ],
+  "source": "polyhaven",
+  "id": "corrugated_iron",
+  "author": "Jenelle van Heerden, Dimitrios Savva"
+ },
+ "laterite": {
+  "metres": [
+   2.0,
+   2.0
+  ],
+  "source": "polyhaven",
+  "id": "red_laterite_soil_stones",
+  "author": "Amal Kumar"
+ },
+ "concrete": {
+  "metres": [
+   4.0,
+   4.0
+  ],
+  "source": "polyhaven",
+  "id": "concrete",
+  "author": "Rob Tuytel"
+ },
+ "grass": {
+  "metres": [
+   1.4,
+   1.4
+  ],
+  "source": "ambientcg",
+  "id": "Grass004",
+  "author": "ambientCG"
+ }
+}

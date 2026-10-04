@@ -1,10 +1,11 @@
 import * as THREE from "three/webgpu";
-import { Fn, If, abs, attribute, dot, float, floor, fract, fwidth, max, min, mix, mod, positionWorld, select, sin, smoothstep, step, uniform, vec2, vec3, vec4 } from "three/tsl";
+import { Fn, If, abs, attribute, cameraViewMatrix, dot, float, floor, fract, fwidth, max, min, mix, mod, normalize, normalWorld, positionWorld, select, sin, smoothstep, step, texture, uniform, vec2, vec3, vec4 } from "three/tsl";
 
 // One shared PBR material for the whole city. Each vertex carries a `facade`
-// attribute (u, v, code, ao) and TSL paints detail procedurally, so there are
-// no textures to download or keep in GPU memory. Works on WebGPU and falls
-// back to WebGL2 automatically.
+// attribute (u, v, code, ao). With real textures loaded (CC0 photo scans,
+// see public/tex/CREDITS.md) surfaces get photographic colour detail,
+// roughness and normal maps sampled in metres; without them TSL paints the
+// detail procedurally. Works on WebGPU and falls back to WebGL2.
 //
 //   code >= 0   building wall. fract(code) = per-building seed; code >= 2 marks
 //               a ground-floor shopfront. u = metres along the wall, v = height.
@@ -15,6 +16,9 @@ import { Fn, If, abs, attribute, dot, float, floor, fract, fwidth, max, min, mix
 //   -5          bare ground (laterite / dust patches)
 //   -6          zinc roof (corrugated, metallic)
 //   -7          flat concrete roof
+//   -8          street lamp head (glows at night)
+//   -9          concrete roof tiles
+//   -10         footpath (concrete paving slabs)
 // ao (w) darkens the colour (baked occlusion, e.g. under eaves).
 
 export const FACADE_PLAIN = -1;
@@ -26,6 +30,30 @@ export const FACADE_ZINC = -6;
 export const FACADE_FLAT_ROOF = -7;
 export const FACADE_LAMP = -8;
 export const FACADE_TILE = -9;
+export const FACADE_PATH = -10;
+
+/** One real-world texture set (CC0 photo-scanned), sampled in metres. */
+export interface TexSet {
+  albedo: THREE.Texture;
+  normal: THREE.Texture;
+  rough: THREE.Texture;
+  /** Metres one tile covers (width, height). */
+  metres: [number, number];
+  /** Average linear albedo, so textures add detail without shifting each building's own colour. */
+  avg: THREE.Vector3;
+}
+export type TexRole = "asphalt" | "footpath" | "brick" | "render" | "plaster" | "rooftile" | "zinc" | "laterite" | "concrete" | "grass";
+export type CityTextures = Partial<Record<TexRole, TexSet>>;
+
+/** Sample a texture set at a position in metres: detail colour (around 1), roughness, tangent-space normal. */
+const sampleSet = (t: TexSet, m: N, contrast = 1) => {
+  const uv = m.div(vec2(t.metres[0], t.metres[1]));
+  return {
+    a: mix(vec3(1), texture(t.albedo, uv).rgb.div(vec3(t.avg.x, t.avg.y, t.avg.z)), contrast),
+    r: texture(t.rough, uv).r,
+    n: texture(t.normal, uv).rgb.mul(2).sub(1),
+  };
+};
 
 /** 0 = Lagos look, 1 = Dublin look (set once per city). */
 export const styleUniform = uniform(0);
@@ -61,8 +89,8 @@ const signColor = Fn(([k]: [N]) => {
   return c;
 });
 
-/** Returns vec4(albedo, roughness). */
-const surface = Fn(() => {
+/** Returns vec4(albedo, roughness). With textures, real photo-scanned detail replaces the procedural noise. */
+const makeSurface = (tex: CityTextures | null) => Fn(() => {
   const fac = attribute("facade", "vec4");
   const base = attribute("color", "vec3");
   const code = fac.z;
@@ -85,9 +113,19 @@ const surface = Fn(() => {
     const bx = fract(u.div(bay));
     // Fade fine detail before it aliases into noise at distance.
     const fine = float(1).sub(smoothstep(0.05, 0.18, fwidth(u).add(fwidth(h))));
-    // Plaster: soft blotches and streaks so walls aren't flat paint.
-    const plaster = vnoise(vec2(u.mul(0.7), h.mul(0.9))).mul(0.6).add(vnoise(vec2(u.mul(3.1), h.mul(3.7))).mul(0.4));
-    c.assign(c.mul(plaster.mul(0.16).add(0.9)));
+    if (tex?.brick && tex.render && tex.plaster) {
+      // Dublin: red brick for brick-coloured houses, roughcast render for the
+      // rest. Lagos: painted plaster. Each tinted by the building's own colour.
+      const at = vec2(u, h);
+      const br = sampleSet(tex.brick, at), rd = sampleSet(tex.render, at, 0.55), pl = sampleSet(tex.plaster, at, 0.8);
+      const isBrick = step(1.35, base.r.div(base.g.add(0.001))).mul(styleUniform);
+      c.assign(base.mul(mix(pl.a, mix(rd.a, br.a, isBrick), styleUniform)));
+      rough.assign(mix(mix(pl.r, rd.r, styleUniform), br.r, isBrick));
+    } else {
+      // Plaster: soft blotches and streaks so walls aren't flat paint.
+      const plaster = vnoise(vec2(u.mul(0.7), h.mul(0.9))).mul(0.6).add(vnoise(vec2(u.mul(3.1), h.mul(3.7))).mul(0.4));
+      c.assign(c.mul(plaster.mul(0.16).add(0.9)));
+    }
     const streak = smoothstep(0.55, 0.9, vnoise(vec2(u.mul(1.3), h.mul(0.12)))).mul(0.12);
     c.assign(c.mul(float(1).sub(streak)));
 
@@ -145,13 +183,20 @@ const surface = Fn(() => {
     .ElseIf(code.lessThan(-1.5).and(code.greaterThan(-2.5)), () => {
       const kf = float(1).sub(smoothstep(0.15, 0.5, fwidth(fac.x)));
       const lagosKerb = mix(vec3(0.53, 0.45, 0.1), mix(vec3(0.96, 0.8, 0.1), vec3(0.09), step(0.5, fract(fac.x.div(1.2)))), kf);
-      c.assign(mix(lagosKerb, vec3(0.62, 0.62, 0.6), styleUniform));
+      const dublinKerb = vec3(0.62, 0.62, 0.6).toVar();
+      if (tex?.concrete) dublinKerb.assign(dublinKerb.mul(sampleSet(tex.concrete, vec2(xz.x.add(xz.y), positionWorld.y)).a));
+      c.assign(mix(lagosKerb, dublinKerb, styleUniform));
       rough.assign(0.75);
     })
     .ElseIf(code.lessThan(-2.5).and(code.greaterThan(-4.5)), () => {
       // Asphalt: grain, patched repairs, worn wheel tracks and the odd pothole.
-      const grain = vnoise(xz.mul(2.3)).mul(0.5).add(vnoise(xz.mul(9)).mul(0.5));
-      c.assign(c.mul(grain.mul(0.18).add(0.88)));
+      if (tex?.asphalt) {
+        const a = sampleSet(tex.asphalt, vec2(xz.x, xz.y.negate()));
+        c.assign(c.mul(a.a));
+      } else {
+        const grain = vnoise(xz.mul(2.3)).mul(0.5).add(vnoise(xz.mul(9)).mul(0.5));
+        c.assign(c.mul(grain.mul(0.18).add(0.88)));
+      }
       const patchy = smoothstep(0.62, 0.7, vnoise(xz.mul(0.12)));
       c.assign(c.mul(float(1).sub(patchy.mul(0.14))));
       const tracks = smoothstep(0.25, 0.0, abs(abs(fac.y).sub(0.5))).mul(0.07);
@@ -171,12 +216,21 @@ const surface = Fn(() => {
       const n = vnoise(xz.mul(0.03)).mul(0.6).add(vnoise(xz.mul(0.17)).mul(0.4));
       // Lagos: dust with laterite patches. Dublin: mown grass with worn, darker patches.
       const lagosGround = mix(c, vec3(0.72, 0.47, 0.33), smoothstep(0.45, 0.75, n).mul(0.55));
-      const grass = mix(vec3(0.3, 0.46, 0.2), vec3(0.4, 0.52, 0.24), n).mul(vnoise(xz.mul(1.3)).mul(0.15).add(0.9));
-      c.assign(mix(lagosGround, grass, styleUniform));
+      const grass = mix(vec3(0.3, 0.46, 0.2), vec3(0.4, 0.52, 0.24), n).mul(vnoise(xz.mul(1.3)).mul(0.15).add(0.9)).toVar();
+      const ground = lagosGround.toVar();
+      if (tex?.grass) grass.assign(grass.mul(sampleSet(tex.grass, vec2(xz.x, xz.y.negate())).a));
+      if (tex?.laterite) ground.assign(mix(c, vec3(0.62, 0.38, 0.26), smoothstep(0.35, 0.7, n).mul(0.6)).mul(sampleSet(tex.laterite, vec2(xz.x, xz.y.negate())).a));
+      c.assign(mix(ground, grass, styleUniform));
       c.assign(c.mul(vnoise(xz.mul(0.7)).mul(0.1).add(0.91)));
       rough.assign(1);
     })
     .ElseIf(code.lessThan(-5.5).and(code.greaterThan(-6.5)), () => {
+      if (tex?.zinc) {
+        const z = sampleSet(tex.zinc, roofUV());
+        c.assign(c.mul(z.a));
+        rough.assign(z.r);
+        return;
+      }
       // Corrugated zinc: ridges every ~7.6 cm, rust blooms, sun-faded sheets.
       const r = xz.x.add(xz.y).mul(82);
       const ridgeFade = float(1).sub(smoothstep(0.6, 2.5, fwidth(r)));
@@ -188,6 +242,12 @@ const surface = Fn(() => {
       rough.assign(mix(float(0.45), float(0.85), rust));
     })
     .ElseIf(code.lessThan(-8.5).and(code.greaterThan(-9.5)), () => {
+      if (tex?.rooftile) {
+        const t = sampleSet(tex.rooftile, roofUV());
+        c.assign(c.mul(t.a));
+        rough.assign(t.r);
+        return;
+      }
       // Concrete roof tiles: rows of ~30 cm with slight per-tile shade.
       const row = positionWorld.y.mul(3.4);
       const tileRow = fract(row);
@@ -196,12 +256,93 @@ const surface = Fn(() => {
       c.assign(c.mul(vnoise(xz.mul(0.6)).mul(0.12).add(0.9)));
       rough.assign(0.82);
     })
+    .ElseIf(code.lessThan(-9.5).and(code.greaterThan(-10.5)), () => {
+      // Footpath: concrete paving slabs.
+      if (tex?.footpath) {
+        const f = sampleSet(tex.footpath, vec2(xz.x, xz.y.negate()));
+        c.assign(c.mul(f.a));
+        rough.assign(f.r);
+      } else c.assign(c.mul(vnoise(xz.mul(0.8)).mul(0.1).add(0.9)));
+    })
     .ElseIf(code.lessThan(-6.5), () => {
+      if (tex?.concrete) c.assign(c.mul(sampleSet(tex.concrete, vec2(xz.x, xz.y.negate())).a));
       c.assign(c.mul(vnoise(xz.mul(0.8)).mul(0.14).add(0.86)));
       rough.assign(0.95);
     });
 
   return vec4(c.mul(fac.w), min(rough, 1));
+});
+
+/** Roof faces: along the eaves and up the slope, in metres. */
+const roofUV = () => {
+  const n = normalWorld;
+  const t = normalize(vec3(n.z.negate(), 0, n.x).add(vec3(1e-4, 0, 0)));
+  const sinSlope = max(float(0.25), float(1).sub(n.y.mul(n.y)).sqrt());
+  return vec2(dot(positionWorld, t), positionWorld.y.div(sinSlope));
+};
+
+/** 1 where a wall pixel is window, door or shopfront (flat glass, paint, shutters): no brick relief. */
+const openings = Fn(([u, h, code]: [N, N, N]) => {
+  const seed = floor(fract(code).mul(1000).add(0.5)).div(1000);
+  const fl = floor(h.div(3.2));
+  const fy = fract(h.div(3.2));
+  const bay = seed.mul(1.4).add(2.4);
+  const bi = floor(u.div(bay));
+  const bx = fract(u.div(bay));
+  const win = step(0.27, bx).mul(step(bx, 0.73)).mul(step(0.32, fy)).mul(step(fy, 0.8));
+  const door = step(fl, 0.5).mul(step(abs(mod(bi, 4).sub(1)), 0.5)).mul(step(0.3, bx)).mul(step(bx, 0.7)).mul(step(fy, 0.72));
+  const shop = step(1.5, code).mul(step(fl, 0.5));
+  return min(float(1), win.add(door).add(shop));
+});
+
+/**
+ * Per-pixel normal from the texture sets' normal maps, built in world space
+ * from each surface's own axes (walls: along the wall and up; ground: east and
+ * north; roofs: along the eaves and up the slope), returned in view space.
+ */
+const makeNormal = (tex: CityTextures) => Fn(() => {
+  const fac = attribute("facade", "vec4");
+  const base = attribute("color", "vec3");
+  const code = fac.z;
+  const N = normalWorld;
+  const xz = positionWorld.xz;
+  const nw = vec3(N).toVar();
+  const ground = (t: TexSet | undefined, strength: number) => {
+    if (!t) return;
+    const n = sampleSet(t, vec2(xz.x, xz.y.negate())).n;
+    // T = +x, B = -z, N = +y.
+    nw.assign(normalize(vec3(n.x.mul(strength), n.z, n.y.mul(strength).negate())));
+  };
+  If(code.greaterThanEqual(0), () => {
+    if (!tex.brick || !tex.render || !tex.plaster) return;
+    const at = vec2(fac.x, fac.y);
+    const isBrick = step(1.35, base.r.div(base.g.add(0.001))).mul(styleUniform);
+    const n = mix(sampleSet(tex.plaster, at).n, mix(sampleSet(tex.render, at).n, sampleSet(tex.brick, at).n, isBrick), styleUniform).toVar();
+    // Glass, doors and shutters stay flat.
+    const flat = openings(fac.x, fac.y, code);
+    n.assign(mix(n, vec3(0, 0, 1), flat));
+    const T = normalize(vec3(N.z.negate(), 0, N.x).add(vec3(1e-4, 0, 0)));
+    nw.assign(normalize(T.mul(n.x).add(vec3(0, 1, 0).mul(n.y)).add(N.mul(n.z))));
+  })
+    .ElseIf(code.lessThan(-2.5).and(code.greaterThan(-4.5)), () => ground(tex.asphalt, 0.8))
+    .ElseIf(code.lessThan(-4.5).and(code.greaterThan(-5.5)), () => {
+      if (tex.grass && tex.laterite) {
+        const at = vec2(xz.x, xz.y.negate());
+        const n = mix(sampleSet(tex.laterite, at).n, sampleSet(tex.grass, at).n, styleUniform);
+        nw.assign(normalize(vec3(n.x, n.z, n.y.negate())));
+      }
+    })
+    .ElseIf(code.lessThan(-9.5).and(code.greaterThan(-10.5)), () => ground(tex.footpath, 1))
+    .ElseIf(code.lessThan(-5.5).and(code.greaterThan(-6.5)).or(code.lessThan(-8.5).and(code.greaterThan(-9.5))), () => {
+      const t = code.greaterThan(-6.5);
+      if (!tex.zinc || !tex.rooftile) return;
+      const n = mix(sampleSet(tex.rooftile, roofUV()).n, sampleSet(tex.zinc, roofUV()).n, select(t, float(1), float(0)));
+      const T = normalize(vec3(N.z.negate(), 0, N.x).add(vec3(1e-4, 0, 0)));
+      const B = normalize(vec3(0, 1, 0).sub(N.mul(N.y)).add(vec3(0, 1e-4, 0)));
+      nw.assign(normalize(T.mul(n.x).add(B.mul(n.y)).add(N.mul(n.z))));
+    })
+    .ElseIf(code.lessThan(-6.5).and(code.greaterThan(-7.5)), () => ground(tex.concrete, 1));
+  return normalize(cameraViewMatrix.mul(vec4(nw, 0)).xyz);
 });
 
 /**
@@ -238,9 +379,10 @@ const nightGlow = Fn(() => {
   return glow.mul(nightUniform);
 });
 
-export function createWorldMaterial(): THREE.MeshStandardNodeMaterial {
+export function createWorldMaterial(tex: CityTextures | null = null): THREE.MeshStandardNodeMaterial {
   const mat = new THREE.MeshStandardNodeMaterial();
-  const s = surface();
+  const s = makeSurface(tex)();
+  if (tex) mat.normalNode = makeNormal(tex)();
   mat.colorNode = s.xyz;
   mat.roughnessNode = s.w;
   mat.emissiveNode = nightGlow();

@@ -131,7 +131,7 @@ let headYaw = 0;
 let frameNo = 0;
 const eyePos = new THREE.Vector3();
 let headTarget = 0;
-if (DEBUG) Object.assign(window, { __me: me, __remotes: remotes, __world: world });
+if (DEBUG) Object.assign(window, { __me: me, __remotes: remotes, __world: world, __camera: camera });
 let online = 1;
 let meetId = Number(params.get("meet")) || 0;
 
@@ -582,7 +582,7 @@ function frame(now: number) {
   placeCamera(dt);
   world.cull(me.pos.x, me.pos.z, fogFar);
   gfx.follow(me.pos.x, me.pos.z);
-  mirrors.active = !!car && cockpit;
+  mirrors.active = !!car && cockpit && !params.has("nomirror");
   if (car && cockpit && (gfx.quality !== "medium" || (frameNo & 1) === 0)) {
     car.eye(eyePos);
     mirrors.render(gfx.renderer, scene, eyePos.x, eyePos.y, eyePos.z, car.yaw);

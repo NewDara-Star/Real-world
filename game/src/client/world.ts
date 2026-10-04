@@ -4,6 +4,8 @@ import type { City } from "./cities";
 import { placeProps, TEMPLATES, type Template } from "./props";
 import { RoadNet } from "./roadnet";
 import { buildRoadNet } from "./roadrender";
+import { loadCityTextures } from "./textures";
+import type { CityTextures } from "./facade";
 
 // Loads a baked world tile (see tools/bake/bake_world.py) and builds cheap
 // chunked meshes: one merged, vertex-coloured geometry per 200 m chunk. Static
@@ -77,15 +79,19 @@ export class World {
   private footprints = new Map<number, Float32Array[]>();
   /** Lane-level road rules, where the place has been baked through SUMO. */
   net: RoadNet | null = null;
+  /** Real-world texture sets, or null for the procedural look. */
+  tex: CityTextures | null = null;
 
   async load(name: string, onProgress?: (p: number) => void): Promise<void> {
-    const [metaRes, bin, net] = await Promise.all([
+    const [metaRes, bin, net, tex] = await Promise.all([
       fetch(`/world/${name}.json`).then((r) => r.json() as Promise<WorldMeta>),
       fetchWithProgress(`/world/${name}.bin`, onProgress),
       RoadNet.load(name),
+      loadCityTextures(),
     ]);
     this.meta = metaRes;
     this.net = net;
+    this.tex = tex;
     this.build(new DataView(bin));
   }
 
@@ -188,7 +194,7 @@ export class World {
       if (p.t === "lamp") this.lamps.push(p.x + Math.sin(p.rot) * 1.5, p.z + Math.cos(p.rot) * 1.5);
     }
 
-    const mat = createWorldMaterial();
+    const mat = createWorldMaterial(this.tex);
     for (const b of chunkBuilders.values()) {
       const mesh = new THREE.Mesh(b.geometry(), mat);
       mesh.matrixAutoUpdate = false;
