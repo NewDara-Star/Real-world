@@ -51,16 +51,17 @@ const KNOWN_LOGITECH = /046d.*(c24f|c294|c260|c266|c267)|g29|g923/i;
 function defaultCalibration(p: Gamepad): WheelCalibration | null {
   if (!KNOWN_LOGITECH.test(p.id)) return null;
   const pedals: number[] = [];
+  // Pedals rest at one end of their range; steering (axis 0) rests mid-way.
   p.axes.forEach((v, i) => {
-    if (i > 0 && Math.abs(Math.abs(v) - 1) < 0.02) pedals.push(i);
+    if (i > 0 && Math.abs(v) > 0.8) pedals.push(i);
   });
   if (pedals.length < 2) return null;
   const [gas, brake] = pedals;
   return {
     id: p.id,
     steer: { axis: 0, left: -1, right: 1 },
-    gas: { axis: gas, rest: p.axes[gas], full: -p.axes[gas] },
-    brake: { axis: brake, rest: p.axes[brake], full: -p.axes[brake] },
+    gas: { axis: gas, rest: Math.sign(p.axes[gas]), full: -Math.sign(p.axes[gas]) },
+    brake: { axis: brake, rest: Math.sign(p.axes[brake]), full: -Math.sign(p.axes[brake]) },
     rotation: 900,
     horn: 2, // Square
     camera: 3, // Triangle
@@ -78,6 +79,25 @@ export class DriveControls {
   enabled = true;
   /** Direct WebHID wheel; when connected it takes priority over everything. */
   g29: G29 | null = null;
+  /** Player says gas and brake are the wrong way round. */
+  swapPedals = (() => {
+    try {
+      return localStorage.getItem("eko-pedal-swap") === "1";
+    } catch {
+      return false;
+    }
+  })();
+  /** What the last read saw, for the wheel monitor. */
+  debug = { source: "keyboard", steer: 0, gas: 0, brake: 0, clutch: 0, axes: [] as number[], id: "" };
+
+  setSwap(on: boolean) {
+    this.swapPedals = on;
+    try {
+      localStorage.setItem("eko-pedal-swap", on ? "1" : "0");
+    } catch {
+      // ignore
+    }
+  }
 
   constructor() {
     addEventListener("keydown", (e) => {
@@ -194,6 +214,17 @@ export class DriveControls {
       }
     }
 
+    if (this.swapPedals && out.device === "wheel") [out.throttle, out.brake] = [out.brake, out.throttle];
+    const anyPad = wheel ?? (navigator.getGamepads?.() ?? []).find((p) => !!p) ?? null;
+    this.debug = {
+      source: g ? `G29 direct · ${this.g29?.mode}` : wheel ? (wcal ? "wheel · gamepad mapping" : "wheel · not mapped") : out.device,
+      steer: out.steer,
+      gas: out.throttle,
+      brake: out.brake,
+      clutch: g ? g.clutch : 0,
+      axes: anyPad ? anyPad.axes.map((a) => Math.round(a * 100) / 100) : [],
+      id: g ? this.g29?.device?.productName ?? "G29" : anyPad?.id ?? "",
+    };
     const edge = (id: string) => pressed.has(id) && !this.prevButtons.has(id);
     const tap = (key: string) => this.enabled && this.tapped.has(key);
     out.camera = tap("c") || edge("w-cam") || edge("gp-cam") || edge("g-cam");

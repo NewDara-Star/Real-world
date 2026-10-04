@@ -26,6 +26,18 @@
       <button class="pill btn" id="drive-exit" hidden>🚶 Get out</button>
       <button class="pill btn" id="wheel-connect" hidden>🎮 Connect wheel</button>
       <button class="pill btn" id="wheel-setup" hidden>🎮 Set up wheel</button>
+      <button class="pill btn" id="wheel-check">🎮 Wheel check</button>
+    </div>
+    <div id="wheelmon" hidden>
+      <div class="wm-head"><b>Wheel check</b><button id="wm-close" aria-label="Close">✕</button></div>
+      <div id="wm-source" class="wm-src"></div>
+      <div class="wm-row"><span>Steer</span><div class="wm-bar wm-center"><i id="wm-steer"></i></div></div>
+      <div class="wm-row"><span>Gas</span><div class="wm-bar"><i id="wm-gas" class="gas"></i></div></div>
+      <div class="wm-row"><span>Brake</span><div class="wm-bar"><i id="wm-brake" class="brake"></i></div></div>
+      <div class="wm-row"><span>Clutch</span><div class="wm-bar"><i id="wm-clutch"></i></div></div>
+      <div id="wm-raw" class="wm-raw"></div>
+      <label class="wm-swap"><input type="checkbox" id="wm-swap" /> Swap gas ↔ brake</label>
+      <p class="wm-tip">Press each pedal: the matching bar should fill. Nothing moving? Click 🎮 Connect wheel. Still nothing? Set the switch on the wheel to <b>PS3</b>, replug, and try again.</p>
     </div>
     <div id="speedo" hidden><b id="kmh">0</b><span>km/h</span><i id="gear">1</i></div>
     <div id="calib" hidden><div class="calib-box"><h2 id="calib-title"></h2><p id="calib-hint"></p></div></div>

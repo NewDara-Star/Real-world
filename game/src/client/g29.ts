@@ -20,9 +20,48 @@
 const VENDOR = 0x046d;
 const PID_G29 = 0xc24f; // native G29 mode
 const PID_COMPAT = 0xc294; // "Driving Force EX" compatibility mode before switching
-const PID_G923_PS = 0xc267;
-const PID_G923_PS2 = 0xc266;
-const FILTERS = [PID_G29, PID_COMPAT, PID_G923_PS, PID_G923_PS2].map((productId) => ({ vendorId: VENDOR, productId }));
+const PID_G923_PS = 0xc267; // G923 PlayStation/PC version, switch on PS4/PS5
+const PID_G923_CLASSIC = 0xc266; // same wheel in PC ("classic") mode
+const PID_G29_PS4 = 0xc260; // mode switch on "PS4"
+const FILTERS = [PID_G29, PID_G29_PS4, PID_COMPAT, PID_G923_PS, PID_G923_CLASSIC].map((productId) => ({ vendorId: VENDOR, productId }));
+
+// Minimal WebHID report-descriptor types (the browser parses the descriptor for us).
+interface HIDItem {
+  usagePage?: number;
+  usages?: number[];
+  usageMinimum?: number;
+  usageMaximum?: number;
+  reportSize?: number;
+  reportCount?: number;
+  logicalMinimum?: number;
+  logicalMaximum?: number;
+  isRange?: boolean;
+  isConstant?: boolean;
+}
+interface HIDReportInfo {
+  reportId?: number;
+  items?: HIDItem[];
+}
+interface HIDCollection {
+  usagePage?: number;
+  usage?: number;
+  inputReports?: HIDReportInfo[];
+  children?: HIDCollection[];
+}
+
+/** One field decoded from the device's own report descriptor. */
+interface Field {
+  page: number;
+  usage: number;
+  bit: number;
+  size: number;
+  min: number;
+  max: number;
+}
+
+const GD = 0x01; // Generic Desktop page
+const BTN = 0x09; // Button page
+const AXES = [0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x40]; // X Y Z Rx Ry Rz Slider Dial Vx
 
 export interface G29State {
   steer: number; // -1..1 across the full 900 degrees
@@ -42,6 +81,7 @@ type HIDDevice = {
   opened: boolean;
   productId: number;
   productName: string;
+  collections?: HIDCollection[];
   open(): Promise<void>;
   close(): Promise<void>;
   sendReport(reportId: number, data: BufferSource): Promise<void>;
@@ -58,6 +98,14 @@ const hid = (): HID | undefined => (navigator as unknown as { hid?: HID }).hid;
 export class G29 {
   device: HIDDevice | null = null;
   state: G29State | null = null;
+  /** Fields from the descriptor, per report ID; null = use the fixed native-mode map. */
+  private layout: Map<number, Field[]> | null = null;
+  /** Resting value of each pedal, learnt from the first report (released). */
+  private rest = new Map<string, number>();
+  /** Raw bytes of the latest report, for the wheel monitor. */
+  raw: Uint8Array | null = null;
+  /** Which decoder is in use, for the wheel monitor. */
+  mode = "";
   /** True once real input reports are arriving. */
   get connected() {
     return !!this.device?.opened && !!this.state;
@@ -87,9 +135,10 @@ export class G29 {
       if (!this.device && e.device.productId !== PID_COMPAT) void this.attach(e.device);
     });
     const devs = (await h.getDevices()).filter((d) => FILTERS.some((f) => f.productId === d.productId));
-    const native = devs.find((d) => d.productId !== PID_COMPAT);
+    const native = pickInterface(devs.filter((d) => d.productId !== PID_COMPAT && d.productId !== PID_G923_PS));
     if (native) return this.attach(native);
-    if (devs[0]) return this.attach(devs[0]);
+    const any = pickInterface(devs);
+    if (any) return this.attach(any);
     return false;
   }
 
@@ -98,12 +147,23 @@ export class G29 {
     const h = hid();
     if (!h) return false;
     const picked = await h.requestDevice({ filters: FILTERS });
-    if (!picked[0]) return false;
-    return this.attach(picked[0]);
+    const dev = pickInterface(picked);
+    if (!dev) return false;
+    return this.attach(dev);
   }
 
   private async attach(d: HIDDevice): Promise<boolean> {
     if (!d.opened) await d.open();
+    if (d.productId === PID_G923_PS) {
+      // G923 in PlayStation mode: switch to classic (PC) mode, which speaks the
+      // standard Logitech force-feedback protocol. Must go on report ID 0x30
+      // (new-lg4ff). The wheel re-enumerates as 0xc266 and "connect" fires.
+      try {
+        await d.sendReport(0x30, new Uint8Array([0xf8, 0x09, 0x07, 0x01, 0x01, 0, 0]));
+      } catch {
+        // Some firmware refuses; fall through and use it as-is (input still works).
+      }
+    }
     if (d.productId === PID_COMPAT) {
       // Compatibility mode only reports 10-bit steering and combined pedals.
       // Switch to native G29 mode; the wheel re-enumerates and "connect" fires.
@@ -112,14 +172,22 @@ export class G29 {
       return false;
     }
     this.device = d;
-    d.addEventListener("inputreport", (e) => this.parse(e.data));
+    this.layout = buildLayout(d.collections ?? []);
+    this.mode = this.layout ? `descriptor (${d.productName || d.productId.toString(16)})` : "fixed G29 map";
+    d.addEventListener("inputreport", (e) => this.parse(e.data, e.reportId));
     await this.setRange(900);
     await this.setSpring(0.25);
     this.onChange?.(true);
     return true;
   }
 
-  private parse(v: DataView) {
+  private parse(v: DataView, reportId = 0) {
+    this.raw = new Uint8Array(v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength));
+    const fields = this.layout?.get(reportId);
+    if (fields) {
+      this.parseFields(v, fields);
+      return;
+    }
     if (v.byteLength < 9) return;
     const b = (i: number) => v.getUint8(i);
     const d0 = b(0), d1 = b(1), d2 = b(2), d3 = b(3);
@@ -138,6 +206,51 @@ export class G29 {
         plus: !!(d2 & 128), minus: !!(d3 & 1), enter: !!(d3 & 8), ps: !!(d3 & 16),
       },
       dpad: hat >= 8 ? 0 : hat + 1,
+    };
+    if (firstReport) this.onChange?.(true);
+  }
+
+  /**
+   * Decode using the device's own descriptor: X is steering; the other axes
+   * (in report order) are gas, brake and clutch, the G29's physical order.
+   * Pedal direction is learnt from the first report, when pedals are released.
+   */
+  private parseFields(v: DataView, fields: Field[]) {
+    const read = (f: Field) => readBits(v, f.bit, f.size);
+    const norm = (f: Field) => (read(f) - f.min) / (f.max - f.min || 1);
+    const steerF = fields.find((f) => f.page === GD && f.usage === 0x30);
+    const pedalF = fields.filter((f) => f.page === GD && f.usage !== 0x30 && AXES.includes(f.usage));
+    const pedal = (i: number) => {
+      const f = pedalF[i];
+      if (!f) return 0;
+      const key = `${f.usage}@${f.bit}`;
+      const n = norm(f);
+      if (!this.rest.has(key)) this.rest.set(key, n > 0.5 ? 1 : 0);
+      const r = this.rest.get(key)!;
+      return Math.max(0, Math.min(1, Math.abs(n - r)));
+    };
+    const btn = (n: number) => {
+      const f = fields.find((x) => x.page === BTN && x.usage === n);
+      return !!f && read(f) > 0;
+    };
+    const hatF = fields.find((f) => f.page === GD && f.usage === 0x39);
+    const hat = hatF ? read(hatF) - hatF.min : 8;
+    const firstReport = !this.state;
+    this.state = {
+      steer: steerF ? Math.max(-1, Math.min(1, norm(steerF) * 2 - 1)) : 0,
+      gas: pedal(0),
+      brake: pedal(1),
+      clutch: pedal(2),
+      // G29 button order (same as the native byte map): 1 X, 2 Square, 3 Circle,
+      // 4 Triangle, 5 right paddle, 6 left paddle, 7 R2, 8 L2, 9 Share, 10 Options,
+      // 11 R3, 12 L3, then +, -, dial, Enter, PS.
+      buttons: {
+        cross: btn(1), square: btn(2), circle: btn(3), triangle: btn(4),
+        paddleRight: btn(5), paddleLeft: btn(6), r2: btn(7), l2: btn(8),
+        share: btn(9), options: btn(10), r3: btn(11), l3: btn(12),
+        plus: btn(20), minus: btn(21), enter: btn(24), ps: btn(25),
+      },
+      dpad: hat >= 0 && hat < 8 ? hat + 1 : 0,
     };
     if (firstReport) this.onChange?.(true);
   }
@@ -201,4 +314,49 @@ export class G29 {
     this.queue = this.queue.then(() => d.sendReport(0, new Uint8Array(bytes))).catch(() => undefined);
     return this.queue;
   }
+}
+
+/** The HID interface that carries the wheel's controls: a Generic Desktop joystick/gamepad collection. */
+function pickInterface(devs: HIDDevice[]): HIDDevice | null {
+  const isWheel = (d: HIDDevice) => (d.collections ?? []).some((c) => c.usagePage === GD && (c.usage === 0x04 || c.usage === 0x05));
+  return devs.find(isWheel) ?? devs[0] ?? null;
+}
+
+/** Bit layout of every input field, from the descriptor WebHID exposes. */
+function buildLayout(collections: HIDCollection[]): Map<number, Field[]> | null {
+  const out = new Map<number, Field[]>();
+  const visit = (c: HIDCollection) => {
+    for (const rep of c.inputReports ?? []) {
+      const fields = out.get(rep.reportId ?? 0) ?? [];
+      let bit = fields.length ? fields[fields.length - 1].bit + fields[fields.length - 1].size : 0;
+      for (const it of rep.items ?? []) {
+        const size = it.reportSize ?? 0, count = it.reportCount ?? 0;
+        for (let i = 0; i < count; i++) {
+          if (!it.isConstant) {
+            const usage = it.isRange ? (it.usageMinimum ?? 0) + i : it.usages?.[Math.min(i, (it.usages?.length ?? 1) - 1)] ?? 0;
+            fields.push({ page: (usage >> 16) || it.usagePage || 0, usage: usage & 0xffff, bit, size, min: it.logicalMinimum ?? 0, max: it.logicalMaximum ?? (2 ** size - 1) });
+          }
+          bit += size;
+        }
+      }
+      out.set(rep.reportId ?? 0, fields);
+    }
+    for (const ch of c.children ?? []) visit(ch);
+  };
+  collections.forEach(visit);
+  // Only trust it if it found a steering axis.
+  for (const f of out.values()) if (f.some((x) => x.page === GD && x.usage === 0x30)) return out;
+  return null;
+}
+
+/** Little-endian bit-field read (HID reports pack fields LSB-first). */
+function readBits(v: DataView, bit: number, size: number): number {
+  let val = 0;
+  for (let i = 0; i < size; i++) {
+    const b = bit + i;
+    const byte = b >> 3;
+    if (byte >= v.byteLength) break;
+    if ((v.getUint8(byte) >> (b & 7)) & 1) val += 2 ** i;
+  }
+  return val;
 }

@@ -541,6 +541,7 @@ function frame(now: number) {
   gameHours = (gameHours + (dt * timeScale) / 3600) % 24;
   clockUniform.value += dt;
   gfx.setTime(gameHours);
+  updateWheelMon(dt);
   hornCooldown -= dt;
   crashCooldown -= dt;
   if (traffic) {
@@ -769,8 +770,34 @@ function refreshWheelButton() {
   $("wheel-connect").hidden = isTouch || !G29.supported() || g29.connected;
   $("wheel-setup").hidden = !drive.needsCalibration();
 }
+// Wheel monitor: live bars so you can see each pedal register.
+let wheelMonOpen = false;
+const openWheelMon = (on: boolean) => {
+  wheelMonOpen = on;
+  $("wheelmon").hidden = !on;
+};
+$("wheel-check").addEventListener("click", () => openWheelMon(!wheelMonOpen));
+$("wm-close").addEventListener("click", () => openWheelMon(false));
+$<HTMLInputElement>("wm-swap").checked = drive.swapPedals;
+$("wm-swap").addEventListener("change", () => drive.setSwap($<HTMLInputElement>("wm-swap").checked));
+function updateWheelMon(dt: number) {
+  if (!wheelMonOpen) return;
+  if (!car) drive.read(dt); // refresh readings while walking too
+  const d = drive.debug;
+  $("wm-source").textContent = `${d.source}${d.id ? ` · ${d.id}` : ""}`;
+  const steer = $("wm-steer");
+  steer.style.left = `${50 + Math.min(0, d.steer) * 50}%`;
+  steer.style.width = `${Math.abs(d.steer) * 50}%`;
+  $("wm-gas").style.width = `${d.gas * 100}%`;
+  $("wm-brake").style.width = `${d.brake * 100}%`;
+  $("wm-clutch").style.width = `${d.clutch * 100}%`;
+  const raw = g29.raw ? Array.from(g29.raw.slice(0, 12), (b) => b.toString(16).padStart(2, "0")).join(" ") : "";
+  $("wm-raw").textContent = raw ? `HID: ${raw}` : d.axes.length ? `axes: ${d.axes.join("  ")}` : "No wheel or controller seen yet. Press a pedal or button.";
+}
+
 g29.onChange = (on) => {
   refreshWheelButton();
+  if (on) openWheelMon(true);
   if (on) toast("G29 connected 🎮 force feedback on. ✕ handbrake · □ horn · △ camera · ○ get out");
 };
 void g29.restore().then(refreshWheelButton);
