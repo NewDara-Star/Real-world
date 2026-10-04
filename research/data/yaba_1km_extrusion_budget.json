@@ -1,0 +1,18 @@
+{
+ "cell": "~1.0 x 1.0 km around Yaba/Tejuosho (3.3730-3.3820E, 6.5050-6.5140N)",
+ "buildings": 2228,
+ "by_source": {
+  "fallback_height": 318,
+  "Google Open Buildings": 271,
+  "OpenStreetMap": 1919,
+  "Microsoft ML Buildings": 38
+ },
+ "height_median_m": 4.5,
+ "height_p90_m": 7.0,
+ "vertices": 50050,
+ "triangles": 25574,
+ "float32_raw_bytes": 907488,
+ "float32_gzip_bytes": 254286,
+ "int16_quantized_raw_bytes": 453744,
+ "int16_quantized_gzip_bytes": 220647
+}
