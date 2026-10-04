@@ -29,10 +29,13 @@ slot into the order below:
 - **Name:** done. The owner chose "World Drive"; title, window, package and
   README use it. (Saved settings keep their `eko-` keys so nobody loses them;
   the deployed worker keeps its name.)
-- **House numbers:** map search finds streets only. The bake keeps no
-  addresses at all (no OSM `addr:*`, no Overture addresses theme), so a home
-  address can't be found. Import whichever has Finglas coverage (check both;
-  Eircode/GeoDirectory are closed). Never hard-code the owner's address.
+- **House numbers:** done. Map search finds "12 Cappagh Rd" (either order,
+  abbreviations, 12a) from OSM's house numbers (4,036 with a street, about a
+  quarter of Finglas houses; Overture's addresses theme has none for Ireland,
+  checked; Eircode/GeoDirectory are closed). An unmapped number offers the
+  street and says it isn't mapped. Dropped pins are named by the address
+  there. More coverage needs mapping in OSM (the owner can add their own
+  road's numbers there, which is the open way to do it).
 - **Front gardens:** built (`gardens.ts`, `streetdetail.ts`). Each Finglas
   house gets its front (the wall facing the street) and its depth to the back
   of the footpath: about 15,000 gardens with walls (render or brick) with

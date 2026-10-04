@@ -1,6 +1,7 @@
 import { ALLOW_SERVICE, LaneKind, type RoadNet } from "./roadnet";
 import type { Navigator } from "./nav";
 import type { World } from "./world";
+import { PlaceSearch } from "./search";
 
 // The map, drawn from the same data the world is built from: buildings,
 // parks, water, every lane and junction, so it always matches the streets
@@ -22,7 +23,7 @@ export class MapView {
   private mini: HTMLCanvasElement;
   private big: HTMLCanvasElement;
   private view = { x: 0, z: 0, scale: 0.25 };
-  private searchIndex: { name: string; kind: string; x: number; z: number }[] = [];
+  private search = new PlaceSearch();
   open = false;
   onDestination: (d: Destination | null) => void = () => {};
 
@@ -272,7 +273,7 @@ export class MapView {
       const q = input.value.trim().toLowerCase();
       list.innerHTML = "";
       if (q.length < 2) return;
-      const hits = this.searchIndex.filter((s) => s.name.toLowerCase().includes(q)).slice(0, 8);
+      const hits = this.search.find(q);
       for (const h of hits) {
         const li = document.createElement("li");
         const b = document.createElement("button");
@@ -302,9 +303,11 @@ export class MapView {
     addEventListener("resize", () => this.open && this.drawBig());
   }
 
-  /** Places and street names you can search for. */
+  /** Places, street names and house numbers you can search for. */
   private buildSearch() {
-    for (const p of this.world.meta.places) this.searchIndex.push({ name: p.name, kind: (p as { cat?: string }).cat?.replace(/_/g, " ") ?? "place", x: p.x, z: p.z });
+    for (const p of this.world.meta.places) this.search.add({ name: p.name, kind: (p as { cat?: string }).cat?.replace(/_/g, " ") ?? "place", x: p.x, z: p.z });
+    const f = this.world.features;
+    for (const [number, street, x, z] of f?.addresses ?? []) this.search.addAddress({ number, street: f!.streets[street] ?? "", x: x / 10, z: z / 10 });
     const net = this.net;
     if (!net) return;
     // Each street once, at the middle of its longest stretch.
@@ -319,19 +322,11 @@ export class MapView {
       const mid = Math.floor(l.pts.length / 4) * 2;
       best.set(e.name, { len: l.length, x: l.pts[mid], z: l.pts[mid + 1] });
     }
-    for (const [n, v] of best) this.searchIndex.push({ name: net.names[n], kind: "street", x: v.x, z: v.z });
+    for (const [n, v] of best) this.search.add({ name: net.names[n], kind: "street", x: v.x, z: v.z });
   }
 
-  /** A name for a dropped pin: the nearest named place or street. */
+  /** A name for a dropped pin: the house number there, or the nearest named place or street. */
   private nameNear(x: number, z: number): string {
-    let best = "Dropped pin", bd = 60 * 60;
-    for (const s of this.searchIndex) {
-      const d = (s.x - x) ** 2 + (s.z - z) ** 2;
-      if (d < bd) {
-        bd = d;
-        best = s.name;
-      }
-    }
-    return best;
+    return this.search.nearest(x, z) ?? "Dropped pin";
   }
 }
