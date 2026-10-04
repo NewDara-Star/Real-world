@@ -14,7 +14,6 @@ import os
 import sys
 
 import bmesh
-import numpy as np
 import bpy
 from mathutils import Matrix, Vector
 
@@ -37,12 +36,13 @@ def srgb(c):
 def material(name, color=0x808080, rough=0.5, metal=0.0, alpha=1.0, surface=None):
     """Principled BSDF. surface = a texture role in public/tex (brick, render, concrete...).
     Those textures are not embedded: the material gets extras.surface = <role> and the
-    game draws it from its own atlas. The base colour is the role's mean albedo, so the
-    model still looks right untextured in a plain glTF viewer."""
+    game draws it from its own atlas. As in glTF, the base colour multiplies that
+    texture, so it stays white: the texture alone sets the colour (a plain glTF viewer,
+    with no atlas, shows these surfaces white)."""
     m = bpy.data.materials.get(name) or bpy.data.materials.new(name)
     m.use_nodes = True
     b = m.node_tree.nodes["Principled BSDF"]
-    b.inputs["Base Color"].default_value = mean_albedo(surface) if surface else srgb(color)
+    b.inputs["Base Color"].default_value = (1.0, 1.0, 1.0, 1.0) if surface else srgb(color)
     b.inputs["Roughness"].default_value = rough
     b.inputs["Metallic"].default_value = metal
     if alpha < 1:
@@ -51,15 +51,6 @@ def material(name, color=0x808080, rough=0.5, metal=0.0, alpha=1.0, surface=None
     if surface:
         m["surface"] = surface
     return m
-
-
-def mean_albedo(role):
-    img = bpy.data.images.load(os.path.join(TEX, role, "albedo.jpg"))
-    px = np.empty(len(img.pixels), dtype=np.float32)
-    img.pixels.foreach_get(px)
-    bpy.data.images.remove(img)
-    rgb = px.reshape(-1, 4)[:, :3].mean(axis=0)  # sRGB-encoded values
-    return (*[v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4 for v in rgb], 1.0)
 
 
 def variants(obj, slot, options):

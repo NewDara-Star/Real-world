@@ -55,6 +55,73 @@ slot into the order below:
   (`.gitignore` refuses anything in `reference/` but previews), no logos or
   identifying features even for chains like Lidl or Tesco.
 
+### Mac screenshot runs, 2026-10-04 night (real GPU: Apple M4, Metal 4)
+
+Runs at 2db1189, 30 shots each, every 15 s: happy, idiot, sad at
+`WORLD_TIME=13`; tragedy at `WORLD_TIME=18 WORLD_TIMESCALE=60` (18:00 to
+01:30, so it covers dusk; started at the real clock, 23:00, it would miss it).
+Shot numbers are `game/shots/<run>/NNN` (kept on the Mac, not committed).
+
+- **City goes near-black in daylight on the Mac; not caused by code.** happy
+  (the first launch after the build, fresh `world-drive` profile) rendered
+  properly for all 30 shots. Every later launch of the same build is dark
+  from its first frame at the same spot (idiot/001, sad/001, check runs):
+  buildings, grass, garden walls, kerbs are one dark navy silhouette; cars,
+  people, lamp posts, sky and HUD are normal. Lower-half brightness 51 when
+  good, 8-11 when dark. Ruled out: GPU caches, HTTP/code caches, saved
+  settings (a fresh `--user-data-dir` is dark too), live weather (there is
+  none), and code: c5943ce, which rendered bright on this Mac at 20:45,
+  renders dark now; so do 8d0d569 and 2db1189. No WebGPU errors in the
+  console. Everything that goes dark draws through the facade material and
+  texture atlas; everything that doesn't, doesn't. Next: restart the Mac and
+  rerun; if it persists, log the atlas (are its texels black?) and test
+  "Real textures: off" properly (the toggle reloads the page and didn't
+  stick in this test). The garden look check waits on this.
+- **Garden walls and piers are near-black even in the good run** (happy/023,
+  happy/027: black slabs along the front gardens). Partly the model: the
+  materials that name a texture set carried that set's mean albedo as base
+  colour, and the game multiplies base colour by the texture, so the render
+  was applied twice (~0.17 x texture). Fixed in the models (base colour now
+  white, as glTF intends for a factor over a texture); not yet seen in the
+  game because of the darkness above.
+- **Hedges:** not judgeable yet (black in every shot that shows them). The
+  reference photo (Ballymun, Commons) shows clipped privet behind low walls;
+  decide on `hedge_privet_1m` once the city renders.
+- **LED lamps at night:** no visible glow or light pool in tragedy/018-029
+  (only lit windows), but these were dark launches, so unconfirmed.
+- **Happy driver:** stopped at red lights (happy/005-006, 016-018), no
+  signalling faults. But it hit a pedestrian crossing at the Jamestown
+  Business Park exit (G3, between happy/003 and 004), had a G2 "no left mirror
+  check" turning left on red-to-green (happy/015), and sat at 0 km/h behind a
+  stopped car for the last 75 s (happy/026-030; a red traffic car is angled
+  across the centre line in happy/027-030).
+- **Idiot:** speeding is now one fault per offence, not per km/h (idiot/019,
+  022, 023). Still odd: two "No signal turning right" within the first 15 s
+  (idiot/001); seven faults in one 15 s window including pedestrian and wall
+  collisions each twice (idiot/007), possibly one incident counted twice;
+  "selected R at 30 km/h" (event 5:39) produced no fault; and it sat stuck
+  at 0 km/h after kerb hits for 2 min (idiot/010-018) and to the end
+  (idiot/024-030).
+- **Sad:** missed turn and reroutes worked (4 reroutes). Mounted the footpath
+  at -1 km/h on Finglas Road (sad/019). Sat-nav banner shows the HTML entity
+  literally: "Saint Helena&apos;s Road" (sad/026).
+- **Tragedy:** gridlocked on Melville Road from tragedy/016 to the end (3.5
+  min at 0-1 km/h), picking up kerb, footpath and vehicle collisions while
+  stationary (tragedy/017-030): faults should not accrue at a standstill
+  from being pushed. 18:43 already looks like night (tragedy/003); sunset in
+  Dublin on 4 Oct is about 19:00.
+- **Screens:** the autodrive's player car is the green box, not the glTF
+  hatchback (manual driving shows the hatchback); Wheel check opens over the
+  view whenever the G29 is plugged in and covers every shot; the autodrive
+  label overlaps the sat-nav's second line. Console: 54 TSL "return in inline
+  Fn" warnings and missing Rocketbox bone tracks (Bip01_*) for the clips.
+- **Keyboard with the G29 plugged in:** works. W and A drove and turned
+  (27 km/h), with "Keyboard is steering. Turn the wheel to take over." on
+  screen and "keyboard steering" in Wheel check. Wheel take-back and the
+  ~13° threshold need the owner's hands; not tested.
+- **House number search:** "48 Melville Way" answers "Melville Way (no. 48
+  isn't mapped)" and offers the street: OSM's gap, as designed.
+
 ## Now
 
 The research in `research/09`–`15` (open-source sims, Forza/AC/iRacing/BeamNG,
