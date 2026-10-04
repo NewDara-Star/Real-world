@@ -6,14 +6,15 @@ factory resets and renders in one process, so prefer one asset per run:
   for a in lamp_post_led wheelie_bin ...; do blender -b ... -- $a; done
 Each one is modelled in metres (Blender Z up,
 front facing -Y), exported to game/public/models/<name>.glb and rendered to
-reference/<name>/preview.png. Textured surfaces reuse the CC0 sets already in
-game/public/tex/ (Poly Haven, see public/tex/CREDITS.md).
+reference/<name>/preview.png. Textured surfaces name a CC0 set already in
+game/public/tex/ (material extras.surface) instead of embedding it.
 """
 import math
 import os
 import sys
 
 import bmesh
+import numpy as np
 import bpy
 from mathutils import Matrix, Vector
 
@@ -33,31 +34,32 @@ def srgb(c):
 
 # ---------------------------------------------------------------- materials
 
-def material(name, color=0x808080, rough=0.5, metal=0.0, alpha=1.0, tex=None):
-    """Principled BSDF. tex = a role in public/tex (albedo/normal/rough maps)."""
+def material(name, color=0x808080, rough=0.5, metal=0.0, alpha=1.0, surface=None):
+    """Principled BSDF. surface = a texture role in public/tex (brick, render, concrete...).
+    Those textures are not embedded: the material gets extras.surface = <role> and the
+    game draws it from its own atlas. The base colour is the role's mean albedo, so the
+    model still looks right untextured in a plain glTF viewer."""
     m = bpy.data.materials.get(name) or bpy.data.materials.new(name)
     m.use_nodes = True
-    nt = m.node_tree
-    b = nt.nodes["Principled BSDF"]
-    b.inputs["Base Color"].default_value = srgb(color)
+    b = m.node_tree.nodes["Principled BSDF"]
+    b.inputs["Base Color"].default_value = mean_albedo(surface) if surface else srgb(color)
     b.inputs["Roughness"].default_value = rough
     b.inputs["Metallic"].default_value = metal
     if alpha < 1:
         b.inputs["Alpha"].default_value = alpha
         m.surface_render_method = "BLENDED"
-    if tex:
-        def img(f, color_data):
-            node = nt.nodes.new("ShaderNodeTexImage")
-            node.image = bpy.data.images.load(os.path.join(TEX, tex, f), check_existing=True)
-            if not color_data:
-                node.image.colorspace_settings.name = "Non-Color"
-            return node
-        nt.links.new(img("albedo.jpg", True).outputs["Color"], b.inputs["Base Color"])
-        nt.links.new(img("rough.jpg", False).outputs["Color"], b.inputs["Roughness"])
-        nmap = nt.nodes.new("ShaderNodeNormalMap")
-        nt.links.new(img("normal.jpg", False).outputs["Color"], nmap.inputs["Color"])
-        nt.links.new(nmap.outputs["Normal"], b.inputs["Normal"])
+    if surface:
+        m["surface"] = surface
     return m
+
+
+def mean_albedo(role):
+    img = bpy.data.images.load(os.path.join(TEX, role, "albedo.jpg"))
+    px = np.empty(len(img.pixels), dtype=np.float32)
+    img.pixels.foreach_get(px)
+    bpy.data.images.remove(img)
+    rgb = px.reshape(-1, 4)[:, :3].mean(axis=0)  # sRGB-encoded values
+    return (*[v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4 for v in rgb], 1.0)
 
 
 def variants(obj, slot, options):
@@ -386,7 +388,7 @@ def telecom_cabinet():
     green = painted("CabinetGreen", 0x27352A, rough=0.45)
     seam = painted("CabinetSeam", 0x0E120F, rough=0.8)
     steel = material("Lock", 0x9A9C9E, rough=0.35, metal=1.0)
-    conc = material("Concrete", 0xB0ADA6, rough=0.9, tex="concrete")
+    conc = material("Concrete", rough=0.9, surface="concrete")
     c = Mesh("Cabinet", [green, seam, steel, conc])
     c.box((1.08, 0.48, 0.10), Vector((0, 0, 0.05)), mat=3)                 # plinth
     f = c.box((1.0, 0.42, 1.08), Vector((0, 0, 0.64)))
@@ -403,9 +405,9 @@ def telecom_cabinet():
 
 
 def wall_mats():
-    render = material("WallRender", 0xFFFFFF, rough=0.9, tex="render")
-    brick = material("WallBrick", 0xFFFFFF, rough=0.9, tex="brick")
-    coping = material("Coping", 0xFFFFFF, rough=0.9, tex="concrete")
+    render = material("WallRender", rough=0.9, surface="render")
+    brick = material("WallBrick", rough=0.9, surface="brick")
+    coping = material("Coping", rough=0.9, surface="concrete")
     return render, brick, coping
 
 

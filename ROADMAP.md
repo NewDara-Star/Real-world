@@ -87,7 +87,9 @@ physics and the driver. `research/15-what-it-takes.md` is the full map.
     Models built (`tools/assets/build_street_furniture.py`, in `public/models/`):
     lamp post, signal head and pole, post box, bus stop pole and shelter, wheelie
     bin, bollard, telecom cabinet, garden wall pier and 1 m section. Not yet
-    placed in the world. Trees and hedges still to build.
+    placed in the world; when they are, the game draws materials with
+    `extras.surface` (walls, cabinet plinth) from its texture atlas. Trees and
+    hedges still to build.
 16. Night: a top-down light map for street lamps and every car's headlights
     (overlaps take the brighter, not the sum; research 16), wet-road streaks.
 
