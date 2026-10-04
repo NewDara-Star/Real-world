@@ -58,7 +58,8 @@ physics and the driver. `research/15-what-it-takes.md` is the full map.
    roundabout junctions, 24 mini-roundabouts as give-way-to-the-right
    junctions with a painted circle, 228 multi-lane sections, 83 signals, real
    limits); Overture is only the fallback. Still open:
-   - a test that watches AI cars yield to the right at a mini-roundabout;
+   - a test that watches AI cars yield to the right at a mini-roundabout
+     (item 9, step 1); the junction rules themselves are now measured;
    - a drive through them on the Mac;
    - the examiner's roundabout rules (item 4), roundabout arrows and markings;
    - Irish open records (research 17, CC BY): Tailte Éireann buildings, GSI
@@ -76,12 +77,28 @@ physics and the driver. `research/15-what-it-takes.md` is the full map.
    height grid that roads, paint and the physics all read, with a test on real
    Finglas data (the Tokyo approach, research 16).
 8. **Live weather** from Open-Meteo: rain, wet roads, fog; wet grip in the tyres.
-9. **NPC traffic:** real trips, IDM/MOBIL calibrated to highD/NGSIM, brake
-   lights and indicators, cyclists, parked cars, buses (Dublin Bus model from
-   `docs/blender-assets.md`). Lane changes limited by forward speed (no
-   sliding sideways when stopped; research 17). Spawns weighted by road class,
-   later by Dublin's junction counts; a driver profile per place (assertive
-   share, gap acceptance, junction blocking), which Lagos needs (research 18).
+9. **NPC drivers, the self-driving way** (research 21: Autoware, Apollo,
+   nuPlan, Waymo's sim-agent metrics, SUMO and Treiber's driver models).
+   Architecture: each situation (light, stop line, give-way, roundabout,
+   crosswalk, junction) puts a stop point or speed cap on the car's path and
+   the lowest wins; IIDM/ACC car following; one "assertiveness" number per
+   driver that sets all their habits; gap acceptance from arrival times at
+   conflict points. Build order:
+   1. Seeded randomness and a realism test (collisions, red lights, speed,
+      acceleration, headway, gaps, junction blocking) run on today's code as
+      the baseline. Includes the open test from item 3: watching AI cars
+      give way at a mini-roundabout.
+   2. The constraint architecture; driver profiles and small human noise.
+   3. Real gap acceptance at give-ways, stop signs, roundabouts and
+      mini-roundabouts (today it's a fixed 4.5 s for everyone).
+   4. Keep-clear boxes (don't enter a junction whose exit is full); NPC
+      indicators and brake lights.
+   5. Routes and lane choice with MOBIL lane changes and merges; right turns
+      across traffic waiting inside the junction.
+   6. Zebra courtesy, parked cars and passing them, reactions to the learner,
+      occasional human errors, buses (Dublin Bus model from the Blender brief).
+   Real trips, calibration to NGSIM (public domain), cyclists.
+
 10. **Pedestrians:** human-looking people are in for Finglas (research 20):
     33 Microsoft Rocketbox people (MIT) built by
     `tools/assets/people/build_people.mjs`, drawn as instanced skinned meshes

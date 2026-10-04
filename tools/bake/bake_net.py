@@ -240,12 +240,13 @@ for n in ET.parse(OSM).getroot().iter("node"):
         zebras += 1
 print(f"{zebras} marked crossings", file=sys.stderr)
 
-# ---- mini-roundabouts: the junctions mini_roundabouts.py made right_before_left ----
+# ---- mini-roundabouts: the junctions mini_roundabouts.py retyped ----
 # (One source of truth: that pass did the matching; netconvert is told not to
-# create right_before_left junctions itself, so the type alone marks them.)
+# create these types itself, so the type alone marks them. Which of the two
+# depends on the side of the road: see mini_roundabouts.py.)
 minis = 0
 for j in junctions:
-    if JTYPES[j["type"]] == "right_before_left":
+    if JTYPES[j["type"]] in ("right_before_left", "left_before_right"):
         j["flags"] |= 0x40
         minis += 1
 print(f"{sum(1 for j in junctions if j['flags'] & 0x80)} roundabout junctions, {minis} mini-roundabouts", file=sys.stderr)
