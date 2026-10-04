@@ -61,7 +61,12 @@ physics and the driver. `research/15-what-it-takes.md` is the full map.
    shade; cascaded sun shadows (`CSMShadowNode`, staggered refresh); temporal
    anti-aliasing plus sharpen (`TRAANode`) instead of SMAA; adaptive quality by
    pixel budget.
-13. Building fronts: facade images per Finglas house style, with metadata that
+13. Building fronts from the house-type kits (`docs/blender-assets.md` §6,
+    built by the owner's local Claude in Blender): the game places the
+    pieces per building by type and size, swaps colours, and paints real
+    shop names from OSM on the shop-parade fascias. Order: Dublin
+    Corporation terrace kit, then shop parade, flats, Lagos compound. Until
+    the kits arrive, facade images per Finglas house style, with metadata that
    drives real 3D porches, eaves and window reveals; interior-mapped windows;
    weathering. Mapillary photos where coverage exists (needs `MAPILLARY_TOKEN`).
 14. Road shader: wear, patches, cracks, worn paint, wetness, reflections.

@@ -24,6 +24,17 @@ the map of every system. Research notes live in `research/`.
   headers. Keys live in environment variables (e.g. `MAPILLARY_TOKEN`); never
   ask for them in chat and never print them.
 
+## There's probably a repo for that
+
+Before writing any system from scratch (a crowd of humans, a city importer, a
+tyre model, a weather effect), assume someone has already built it and look
+first: GitHub, published datasets, cities' open data, game-dev write-ups. Study
+the best two or three, read their code and licences, then write our own
+version from what they teach (techniques, never copied code). Write the
+findings into `research/` and say which repo the idea came from. The many
+open city digital twins (research 17, 19) are the model for this: we import,
+we don't hand-build.
+
 ## Solve the real problem
 
 - **First principles, not patches.** Find why something is wrong before

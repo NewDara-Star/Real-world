@@ -24,6 +24,23 @@ you're allowed to use; never Google Street View). Finished files go in
 
 ## Global rules (all assets)
 
+- **Real-life look first.** Every surface uses photo-scanned PBR materials
+  (Poly Haven, ambientCG: CC0) at real-world scale: base colour, roughness,
+  normal (and AO/height where they help), mapped so a brick is a brick's size
+  (about 512 px per metre on walls, 1024 on things you see up close in the
+  car). Add the wear real things have: dirt at the base of walls, streaks under
+  sills, faded paint, chipped kerbs. Bake small details (mortar depth, panel
+  gaps, weathering) into the normal and AO maps instead of adding triangles.
+  Check against reference photos side by side before exporting.
+- **Credits are enforced.** A commit adding a file under `game/public/models/`
+  is refused unless `game/public/models/CREDITS.md` names it with each
+  texture's source, author and licence. A commit changing code needs a
+  `Story:` paragraph, and pushes are reviewed by a second Claude
+  (see `CLAUDE.md`, "Checks and hooks").
+- **Reference photos:** your own photos first. Open photo sites (Geograph
+  Ireland, Wikimedia Commons, Panoramax) may be looked at for reference only,
+  never traced or used as textures. Never Google Maps, Street View or Earth.
+
 - **Units and axes:** metres. glTF export with +Y up (Blender's default
   exporter converts Z-up for you). The model's front faces **+Z** in glTF
   (in Blender: the front faces -Y).
@@ -100,3 +117,45 @@ you're allowed to use; never Google Street View). Finished files go in
   `Bark`. Budget: 30k triangles.
 - `hedge_privet_1m.glb`: a 1 m long, 1.2 m tall privet hedge section that tiles
   end to end.
+
+### 6. House-type kits (the world's buildings)
+
+The game will build every house from these kits by type and size, so the
+streets look like the real place without copying anyone's house. Each kit is a
+set of modular pieces with **no identifying features**: no house numbers, no
+names, no unique details from a single real house. Build them from the common
+look of the type.
+
+Kit pieces (one `.glb` per kit, each piece a separate node, pivot at its
+bottom-left front corner, front facing +Z, sizes exact so pieces snap):
+- `Wall_Bay_Ground`, `Wall_Bay_Upper`: one window bay, 2.7 m wide, 2.7 m storey
+  height, window set back 10 cm into the wall (real reveals and sills).
+- `Wall_Door_Ground`: a bay with the front door and its step.
+- `Wall_Plain_Ground`, `Wall_Plain_Upper`: no opening (for side walls).
+- `Corner_Ground`, `Corner_Upper`: the corner trim where two walls meet.
+- `Roof_Hip_Section`, `Roof_Gable_Section`, `Roof_Gable_End`: 2.7 m sections
+  plus ends; ridge, eaves with fascia and gutter, downpipe as its own node.
+- `Porch_Canopy`, `Chimney_Stack`, `Front_Wall_1m`, `Front_Wall_Pier`,
+  `Gate_Pedestrian`.
+- Materials named so the game can swap colours: `Render_Upper`,
+  `Brick_Lower`, `RoofTile`, `Door`, `WindowFrame`, `Glass`.
+
+Kits, in priority order:
+1. `kit_dublin_corp_terrace.glb`: Finglas's 1950s–70s Dublin Corporation
+   two-storey terraced and semi-detached houses. Pebbledash or smooth render
+   upstairs, brick or render downstairs, concrete tile roofs (hipped and
+   gabled), small porch canopies, uPVC windows, low front garden walls with
+   piers. This one kit covers most of Finglas.
+2. `kit_shop_parade.glb`: a local shopping parade (one or two storeys, flat
+   roof with parapet, shutters). The fascia sign board is a separate node
+   named `Fascia` with its own material, left blank: the game paints the real
+   shop name from OpenStreetMap onto it.
+3. `kit_low_rise_flats.glb`: three- to four-storey brick or rendered flats and
+   maisonettes with external stairs and balconies.
+4. `kit_lagos_compound.glb`: for Yaba later: one- to three-storey rendered
+   blocks with burglar bars, corrugated or tiled roofs, perimeter wall and
+   gate.
+
+Budget: 3k triangles per piece; the whole kit under 60k. Textures 2048 px
+maximum, shared across the kit (one material set per kit).
+
