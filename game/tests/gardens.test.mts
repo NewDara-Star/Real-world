@@ -88,5 +88,10 @@ const binG = await glb("wheelie_bin");
 const binCol = (swap: Record<string, string>) => gltfTemplate(binG, swap).col.slice(0, 3).join();
 check("black, green and brown bins differ", new Set([binCol({ BinGreen: "BinBlack" }), binCol({}), binCol({ BinGreen: "BinBrown" })]).size === 3);
 check("the LED lamp's lens glows at night", codes(gltfTemplate(await glb("lamp_post_led"))).has(FACADE_LAMP));
+// Bug reproduced (push review): a place without the street models (Yaba) had
+// mapped walls the car hit but nobody could see.
+const bare = new World(CITIES.yaba);
+bare.barriers = [{ kind: 0, h: 1.8, pts: [0, 0, 10, 0] }];
+check("mapped walls aren't solid where they aren't drawn", bare.detail === null && bare.barrierColliders().length === 0);
 check("the same house gets the same garden every time", JSON.stringify(new GardenPlanner(world.buildings, net, (x, z) => world.insideBuilding(x, z)).plot(one.b)) === JSON.stringify(one));
 done();

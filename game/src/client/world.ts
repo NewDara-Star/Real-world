@@ -345,9 +345,14 @@ export class World {
     return out;
   }
 
-  /** Mapped walls and hedges (OSM), as colliders: flat [ax, az, bx, bz, height, thickness, ...]. */
+  /**
+   * Mapped walls and hedges (OSM), as colliders: flat [ax, az, bx, bz, height,
+   * thickness, ...]. Only where they're drawn (the street detail layer):
+   * nothing solid that the driver can't see.
+   */
   barrierColliders(): number[] {
     const out: number[] = [];
+    if (!this.detail) return out;
     for (const { kind, h, pts } of this.barriers) {
       for (let k = 0; k + 3 < pts.length; k += 2) out.push(pts[k], pts[k + 1], pts[k + 2], pts[k + 3], h, kind === 1 ? 0.8 : 0.3);
     }
