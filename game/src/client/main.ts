@@ -15,6 +15,7 @@ import { Examiner, type Fault } from "./rules";
 import { Navigator } from "./nav";
 import { MapView } from "./map";
 import { preloadCarModel } from "./carmodel";
+import { texturesEnabled } from "./textures";
 import { World, type Place } from "./world";
 import { FLAG_DANFO, FLAG_DRIVING, FLAG_MOVING, FLAG_RUNNING, type MoveState, type PlayerInfo } from "../shared/protocol";
 import { PlayerVehicle, type VehicleKind } from "./drive";
@@ -233,7 +234,7 @@ world
     };
     // Places baked with a road network get rule-following traffic.
     traffic = world.net
-      ? new NetTraffic(world.net, honk, isTouch ? { vehicles: 30, walkers: 50 } : { vehicles: 70, walkers: 110 })
+      ? new NetTraffic(world.net, honk, isTouch ? { vehicles: 30, walkers: 50 } : { vehicles: 70, walkers: 110 }, CITY.drive)
       : new Traffic(world, honk, isTouch ? { vehicles: 24, walkers: 30 } : { vehicles: 40, walkers: 60 });
     if (DEBUG) Object.assign(window, { __traffic: traffic });
     if (DEBUG) setTimeout(() => Object.assign(window, { __nav: navigator_ }), 0);
@@ -1148,6 +1149,17 @@ addEventListener("keydown", (e) => {
   if (e.key === "Escape" || e.key === "p" || e.key === "P") setPaused(!paused);
 });
 $("pause-resume").addEventListener("click", () => setPaused(false));
+// Real textures need a reload to rebuild the city; the switch is an escape
+// hatch if a GPU/driver ever renders them wrong.
+$("pause-textures").textContent = `Real textures: ${texturesEnabled() ? "on" : "off"}`;
+$("pause-textures").addEventListener("click", () => {
+  try {
+    localStorage.setItem("eko-textures", texturesEnabled() ? "off" : "on");
+  } catch {
+    // ignore
+  }
+  location.reload();
+});
 $("pause-world").addEventListener("click", () => $("world").click());
 
 // ---------------------------------------------------------------- utils ----

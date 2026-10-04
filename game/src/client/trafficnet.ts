@@ -1,7 +1,7 @@
 import * as THREE from "three/webgpu";
 import { createVertexColorMaterial } from "./facade";
 import { makeTemplate, mulberry32, templateGeometry } from "./props";
-import { ALLOW_CAR, ALLOW_SERVICE, EDGE_STOP, LaneKind, MARKED, type Lane, type Link, type RoadNet } from "./roadnet";
+import { ALLOW_CAR, ALLOW_SERVICE, EDGE_STOP, EDGE_TWO_WAY, LaneKind, MARKED, type Lane, type Link, type RoadNet } from "./roadnet";
 import { carTemplate, walkerTemplate, type TrafficEvents } from "./traffic";
 
 // Rule-following traffic and pedestrians on a SUMO road network.
@@ -47,6 +47,14 @@ interface Car {
   wait: number;
   blockedByPlayer: number;
   honk: number;
+  /** Sideways offset from the lane centre (+ left), for overtaking and lane changes. */
+  lat: number;
+  latTarget: number;
+  /** drive: normal. backoff: reversing after a bump. overtake: passing a blockage. */
+  mode: "drive" | "backoff" | "overtake";
+  modeT: number;
+  /** Seconds since the player hit this car (counts down). */
+  bumped: number;
   x: number;
   z: number;
   yaw: number;
@@ -144,7 +152,12 @@ export class NetTraffic {
   private one = new THREE.Vector3(1, 1, 1);
   private pt = { x: 0, z: 0, dx: 0, dz: 1 };
 
-  constructor(readonly net: RoadNet, private ev: TrafficEvents, budget: { vehicles: number; walkers: number }) {
+  /** Which side of the lane a car pulls out to when overtaking (+ left of travel). */
+  private overtakeSide: number;
+
+  constructor(readonly net: RoadNet, private ev: TrafficEvents, budget: { vehicles: number; walkers: number }, drive: "left" | "right" = "left") {
+    // Keep left: overtake on the right, and vice versa.
+    this.overtakeSide = drive === "left" ? -1 : 1;
     const mat = createVertexColorMaterial(0.55, 0.15);
     const total = KINDS.reduce((s, k) => s + k.n, 0);
     KINDS.forEach((k, kind) => {
@@ -194,7 +207,8 @@ export class NetTraffic {
     const k = KINDS[kind];
     return {
       kind, len: k.len, w: k.w, active: false, lane: this.net?.lanes[0] as Lane, s: 0, v: 0, link: null, via: -1,
-      v0f: 1, T: 1.4, a: 1.6, b: 2.6, stopDone: 0, go: true, wait: 0, blockedByPlayer: 0, honk: 0, x: 1e9, z: 1e9, yaw: 0,
+      v0f: 1, T: 1.4, a: 1.6, b: 2.6, stopDone: 0, go: true, wait: 0, blockedByPlayer: 0, honk: 0,
+      lat: 0, latTarget: 0, mode: "drive", modeT: 0, bumped: 0, x: 1e9, z: 1e9, yaw: 0,
     };
   }
   private blankPed(kind: number): Ped {
@@ -240,7 +254,10 @@ export class NetTraffic {
         const depth = r + ar - d;
         if (depth > 0 && (!best || depth > best.depth)) {
           best = { nx: dx / (d || 1), nz: dz / (d || 1), depth, kind: "car" };
-          c.v = Math.min(c.v, 0.5);
+          // A knock: stop, step back off the player's car, then decide what to do.
+          c.v = 0;
+          c.bumped = 3;
+          if (c.via === -1) c.s = Math.max(0, c.s - Math.min(0.4, depth));
         }
       }
     }
@@ -328,6 +345,9 @@ export class NetTraffic {
       c.wait = 0;
       c.go = true;
       c.blockedByPlayer = 0;
+      c.lat = c.latTarget = 0;
+      c.mode = "drive";
+      c.bumped = 0;
       c.active = true;
       this.place(c);
       let arr = this.onLane.get(l.id);
@@ -476,20 +496,25 @@ export class NetTraffic {
     }
     // The player's car in the corridor ahead.
     const pl = this.player;
-    if (pl.driving || pl.speed >= 0) {
+    let playerAhead = Infinity;
+    {
       const fx = Math.sin(c.yaw), fz = Math.cos(c.yaw);
       const rx = pl.x - c.x, rz = pl.z - c.z;
       const ahead = rx * fx + rz * fz;
       const side = Math.abs(rx * fz - rz * fx);
+      playerAhead = ahead;
       if (ahead > 0 && ahead < 60 && side < (pl.driving ? 1.9 : 1.2)) {
         const g = ahead - c.len / 2 - (pl.driving ? 2.3 : 0.6);
+        // The player's speed along our heading: negative when coming at us head-on.
+        const pv = pl.driving ? pl.speed * (Math.sin(pl.yaw) * fx + Math.cos(pl.yaw) * fz) : 0;
         if (g < gap) {
           gap = g;
-          leadV = pl.driving ? pl.speed : 0;
+          leadV = pv;
         }
-        c.blockedByPlayer = g < 6 && c.v < 0.5 ? c.blockedByPlayer + dt : 0;
+        c.blockedByPlayer = g < 8 && c.v < 0.5 && pl.speed < 0.8 ? c.blockedByPlayer + dt : 0;
       } else c.blockedByPlayer = 0;
     }
+    this.react(c, dt, playerAhead);
 
     // Junction ahead: a virtual stopped car at the stop line if we may not go.
     if (c.via === -1 && c.link) {
@@ -514,6 +539,16 @@ export class NetTraffic {
           }
         }
       }
+    }
+
+    if (c.mode === "backoff") {
+      // Reverse slowly out of contact, unless someone is right behind.
+      const behind = (this.onLane.get(lane.id) ?? []).some((o) => o !== c && o.s < c.s && c.s - o.s < (o.len + c.len) / 2 + 3);
+      c.v = behind || c.s <= 0.5 ? 0 : -1.2;
+      c.s = Math.max(0, c.s + c.v * dt);
+      c.lat += Math.max(-1.3 * dt, Math.min(1.3 * dt, c.latTarget - c.lat));
+      this.place(c);
+      return;
     }
 
     // Intelligent Driver Model.
@@ -552,7 +587,8 @@ export class NetTraffic {
         else this.enterRoad(c, net.lanes[c.link!.to]);
       }
     }
-    // Hopelessly stuck (gridlock, or the player parked in the way): vanish like SUMO's teleport.
+    c.lat += Math.max(-1.3 * dt, Math.min(1.3 * dt, c.latTarget - c.lat));
+    // Hopelessly stuck (gridlock): vanish like SUMO's teleport. Never while the player is watching it wait for them.
     if (c.wait > 50 && c.blockedByPlayer === 0) c.active = false;
     this.place(c);
   }
@@ -564,6 +600,87 @@ export class NetTraffic {
     c.stopDone = 0;
   }
 
+  /**
+   * What a driver does about the player's car: back off after a knock, then,
+   * if still blocked, change lane on a multi-lane road or overtake through
+   * the oncoming lane when it's clear (as ambient traffic does in open-world
+   * games); otherwise wait and honk.
+   */
+  private react(c: Car, dt: number, playerAhead: number) {
+    c.bumped = Math.max(0, c.bumped - dt);
+    c.modeT -= dt;
+    if (c.mode === "backoff") {
+      if (c.modeT <= 0) c.mode = "drive";
+      return;
+    }
+    if (c.mode === "overtake") {
+      // Back in once the obstacle is well behind (or give up after a while).
+      if (playerAhead < -(c.len + 4) || c.modeT <= 0) {
+        c.latTarget = 0;
+        if (Math.abs(c.lat) < 0.05) c.mode = "drive";
+      }
+      return;
+    }
+    if (c.via !== -1) return;
+    if (c.bumped > 2.5 && playerAhead > 0 && playerAhead < c.len / 2 + 3) {
+      c.mode = "backoff";
+      c.modeT = 1.8;
+      return;
+    }
+    if (c.blockedByPlayer < 3) return;
+    if (this.changeLane(c)) return;
+    const e = c.lane.edge >= 0 ? this.net.edges[c.lane.edge] : null;
+    if (e && e.flags & EDGE_TWO_WAY && this.oncomingClear(c)) {
+      c.mode = "overtake";
+      c.modeT = 14;
+      c.latTarget = this.overtakeSide * c.lane.width;
+      c.blockedByPlayer = 0;
+    }
+  }
+
+  /** Move to an adjacent same-direction lane if there's a gap. */
+  private changeLane(c: Car): boolean {
+    const net = this.net;
+    const lane = c.lane;
+    if (lane.edge < 0) return false;
+    const e = net.edges[lane.edge];
+    for (const cand of net.carLanes(e)) {
+      if (cand === lane || Math.abs(cand.index - lane.index) !== 1 || cand.allow & ALLOW_SERVICE) continue;
+      const s2 = (c.s / lane.length) * cand.length;
+      if ((this.onLane.get(cand.id) ?? []).some((o) => Math.abs(o.s - s2) < 12)) continue;
+      const ahead = net.at(cand, Math.min(cand.length, s2 + 6), this.pt);
+      if (Math.hypot(ahead.x - this.player.x, ahead.z - this.player.z) < 3.5) continue;
+      // Keep the car where it is and let it slide across.
+      const here = net.at(cand, s2, this.pt);
+      const lat = (c.x - here.x) * here.dz - (c.z - here.z) * here.dx;
+      c.lane = cand;
+      c.s = s2;
+      c.link = this.pickLink(cand);
+      c.lat = lat;
+      c.latTarget = 0;
+      c.blockedByPlayer = 0;
+      return true;
+    }
+    return false;
+  }
+
+  /** Nothing coming the other way in the next ~80 m on the side we'd pull out to. */
+  private oncomingClear(c: Car): boolean {
+    const fx = Math.sin(c.yaw), fz = Math.cos(c.yaw);
+    const lx = fz * this.overtakeSide, lz = -fx * this.overtakeSide; // toward the overtaking side
+    for (const o of this.cars) {
+      if (!o.active || o === c) continue;
+      const rx = o.x - c.x, rz = o.z - c.z;
+      const ahead = rx * fx + rz * fz;
+      const out = rx * lx + rz * lz;
+      if (ahead < -5 || ahead > 120 || out < 0.8 || out > c.lane.width * 2) continue;
+      // Oncoming: is it here before we're past (~7 s)? Same direction: just don't cut it up.
+      const toward = Math.sin(o.yaw) * fx + Math.cos(o.yaw) * fz < -0.3;
+      if (toward ? Math.max(0, ahead) / (o.v + 3) < 7 : ahead < 20) return false;
+    }
+    return true;
+  }
+
   private pathAfter(c: Car): number[] {
     if (!c.link) return [];
     const L = c.link;
@@ -573,8 +690,9 @@ export class NetTraffic {
 
   private place(c: Car) {
     const p = this.net.at(c.lane, c.s, this.pt);
-    c.x = p.x;
-    c.z = p.z;
+    // Left of travel is (dz, -dx).
+    c.x = p.x + p.dz * c.lat;
+    c.z = p.z - p.dx * c.lat;
     const yaw = Math.atan2(p.dx, p.dz);
     let d = yaw - c.yaw;
     d = Math.atan2(Math.sin(d), Math.cos(d));
@@ -614,9 +732,12 @@ export class NetTraffic {
       return (st === "G" || st === "g") && this.net.signalRemaining(k.tl, k.li, this.time) > cross.length / 1.2 + 2;
     }
     const mid = this.net.at(cross, cross.length / 2, this.pt);
-    const mx = mid.x, mz = mid.z;
     // Zebra: approaching drivers must stop, so only wait for those too close to.
-    const horizon = cross.allow & MARKED ? 1.6 : 6;
+    return this.gapAt(mid.x, mid.z, cross.allow & MARKED ? 1.6 : 6);
+  }
+
+  /** No vehicle (or the player) will reach (mx, mz) within `horizon` seconds. */
+  private gapAt(mx: number, mz: number, horizon: number): boolean {
     const threat = (x: number, z: number, yaw: number, v: number) => {
       const dx = mx - x, dz = mz - z;
       const d = Math.hypot(dx, dz);
@@ -629,6 +750,28 @@ export class NetTraffic {
     const pl = this.player;
     if (pl.driving && threat(pl.x, pl.z, pl.yaw, pl.speed)) return false;
     return true;
+  }
+
+  private onCarLane(x: number, z: number): boolean {
+    const hit = this.net.locate(x, z, null, ALLOW_CAR);
+    return !!hit && hit.lane.kind === LaneKind.Road && Math.abs(hit.lat) < hit.lane.width / 2;
+  }
+
+  /**
+   * Something in a walker's way: the player's car just ahead, or a mapped
+   * footpath about to cross a road with traffic coming.
+   */
+  private walkBlocked(p: Ped): boolean {
+    const q = this.net.at(p.lane, p.s, this.pt);
+    const dx = q.dx * p.dir, dz = q.dz * p.dir;
+    const x = q.x + q.dz * p.off, z = q.z - q.dx * p.off;
+    const pl = this.player;
+    if (pl.driving && Math.hypot(x + dx * 1.2 - pl.x, z + dz * 1.2 - pl.z) < 2.6) return true;
+    if (p.lane.kind === LaneKind.Footpath) {
+      const ax = x + dx * 1.5, az = z + dz * 1.5;
+      if (this.onCarLane(ax, az) && !this.onCarLane(x, z) && !this.gapAt(ax, az, 6)) return true;
+    }
+    return false;
   }
 
   private stepPed(p: Ped, dt: number) {
@@ -657,6 +800,13 @@ export class NetTraffic {
       this.placePed(p);
       return;
     }
+    if (this.walkBlocked(p)) {
+      p.waiting += dt;
+      if (p.waiting > 60) p.active = false;
+      this.placePed(p);
+      return;
+    }
+    p.waiting = 0;
     p.s += p.v * dt * p.dir;
     if (p.s < 0 || p.s > p.lane.length) {
       const atEnd = p.s > p.lane.length;

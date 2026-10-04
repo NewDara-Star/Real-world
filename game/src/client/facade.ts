@@ -1,5 +1,5 @@
 import * as THREE from "three/webgpu";
-import { Fn, If, abs, attribute, cameraViewMatrix, int, dot, float, floor, fract, fwidth, max, min, mix, mod, normalize, normalWorld, positionWorld, select, sin, smoothstep, step, texture, uniform, vec2, vec3, vec4 } from "three/tsl";
+import { Fn, If, abs, attribute, cameraViewMatrix, dFdx, dFdy, dot, float, floor, fract, fwidth, max, min, mix, mod, normalize, normalWorld, positionWorld, select, sin, smoothstep, step, texture, uniform, vec2, vec3, vec4 } from "three/tsl";
 
 // One shared PBR material for the whole city. Each vertex carries a `facade`
 // attribute (u, v, code, ao). With real textures loaded (CC0 photo scans,
@@ -32,9 +32,9 @@ export const FACADE_LAMP = -8;
 export const FACADE_TILE = -9;
 export const FACADE_PATH = -10;
 
-/** One real-world texture set (CC0 photo-scanned): a layer in the shared texture arrays. */
+/** One real-world texture set (CC0 photo-scanned): a tile in the shared atlases. */
 export interface TexSet {
-  layer: number;
+  tile: [number, number];
   /** Metres one tile covers (width, height). */
   metres: [number, number];
   /** Average linear albedo, so textures add detail without shifting each building's own colour. */
@@ -42,23 +42,33 @@ export interface TexSet {
 }
 export type TexRole = "asphalt" | "footpath" | "brick" | "render" | "plaster" | "rooftile" | "zinc" | "laterite" | "concrete" | "grass";
 /**
- * All sets packed into two texture arrays (colour; normal + roughness in
- * alpha). Shaders may bind only 16 textures, so one image per map fails.
+ * All sets packed into two atlases (colour; normal + roughness in alpha):
+ * shaders may bind only 16 textures, so one image per map fails.
  */
 export interface CityTextures {
-  albedo: THREE.DataArrayTexture;
-  nr: THREE.DataArrayTexture;
+  albedo: THREE.DataTexture;
+  nr: THREE.DataTexture;
+  grid: [number, number];
   sets: Partial<Record<TexRole, TexSet>>;
 }
 
-let ARRAYS: { albedo: THREE.DataArrayTexture; nr: THREE.DataArrayTexture } | null = null;
+let ATLAS: CityTextures | null = null;
 
-/** Sample a texture set at a position in metres: detail colour (around 1), roughness, tangent-space normal. */
+/**
+ * Sample a set at a position in metres: detail colour (around 1), roughness,
+ * tangent-space normal. Tiling inside an atlas cell uses fract() with explicit
+ * gradients, so mip selection doesn't jump at the wrap.
+ */
 const sampleSet = (t: TexSet, m: N, contrast = 1) => {
+  const A = ATLAS!;
   const uv = m.div(vec2(t.metres[0], t.metres[1]));
-  const nr = texture(ARRAYS!.nr, uv).depth(int(t.layer));
+  const inset = 6 / 1024; // keep clear of the neighbouring cells' texels at lower mips
+  const scale = vec2((1 - 2 * inset) / A.grid[0], (1 - 2 * inset) / A.grid[1]);
+  const at = fract(uv).mul(1 - 2 * inset).add(inset).add(vec2(t.tile[0], t.tile[1])).div(vec2(A.grid[0], A.grid[1]));
+  const gx = dFdx(uv).mul(scale), gy = dFdy(uv).mul(scale);
+  const nr = texture(A.nr, at).grad(gx, gy);
   return {
-    a: mix(vec3(1), texture(ARRAYS!.albedo, uv).depth(int(t.layer)).rgb.div(vec3(t.avg.x, t.avg.y, t.avg.z)), contrast),
+    a: mix(vec3(1), texture(A.albedo, at).grad(gx, gy).rgb.div(vec3(t.avg.x, t.avg.y, t.avg.z)), contrast),
     r: nr.a,
     n: nr.rgb.mul(2).sub(1),
   };
@@ -390,7 +400,7 @@ const nightGlow = Fn(() => {
 
 export function createWorldMaterial(tex: CityTextures | null = null): THREE.MeshStandardNodeMaterial {
   const mat = new THREE.MeshStandardNodeMaterial();
-  ARRAYS = tex ? { albedo: tex.albedo, nr: tex.nr } : null;
+  ATLAS = tex;
   const s = makeSurface(tex)();
   if (tex) mat.normalNode = makeNormal(tex)();
   mat.colorNode = s.xyz;
