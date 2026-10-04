@@ -13,3 +13,6 @@ reference/**
 !reference/*/
 !reference/README.md
 !reference/*/preview.png
+
+# Python bytecode
+__pycache__/
