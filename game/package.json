@@ -9,18 +9,23 @@
     "build": "npm run typecheck && vite build",
     "typecheck": "tsc --noEmit && tsc --noEmit -p src/server",
     "deploy": "vite build && wrangler deploy",
-    "bake": "python3 ../tools/bake/bake_world.py"
+    "bake": "python3 ../tools/bake/bake_world.py",
+    "desktop": "vite build && electron .",
+    "package:mac": "vite build && electron-packager . \"Eko Drive\" --platform=darwin --arch=arm64 --out=release --overwrite --prune=true --ignore=\"^/(src|public|tools|research|release|node_modules|\\.wrangler)($|/)\""
   },
   "dependencies": {
     "three": "^0.186.1"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261004.1",
+    "@electron/packager": "^20.3.0",
     "@types/three": "^0.186.0",
     "@types/ws": "^8.18.2",
+    "electron": "^44.5.1",
     "typescript": "^7.0.2",
     "vite": "^8.3.2",
     "wrangler": "^4.147.0",
     "ws": "^8.22.0"
-  }
+  },
+  "main": "desktop/main.cjs"
 }

@@ -21,6 +21,8 @@ import { G29 } from "./g29";
 const params = new URLSearchParams(location.search);
 const DEBUG = params.has("debug");
 const CITY = cityFor(params.get("city"));
+/** Desktop app (or ?solo=1): single player, no server, no chat. */
+const SOLO = params.has("solo") || "ekoDesktop" in window;
 const ZONE = CITY.zone;
 styleUniform.value = CITY.style === "dublin" ? 1 : 0;
 const WALK = 2.6;
@@ -187,6 +189,13 @@ const net = new Net({
 
 const NAMES = ["Tunde", "Ada", "Chioma", "Seyi", "Kemi", "Emeka", "Bola", "Ngozi", "Femi", "Zainab", "Dayo", "Ifeoma", "Tolu", "Musa", "Amaka", "Segun", "Halima", "Kunle"];
 $<HTMLInputElement>("name").value = NAMES[Math.floor(Math.random() * NAMES.length)];
+if (SOLO) {
+  // Single-player app: no name or vibe to ask for, just drive.
+  document.querySelector(".join-box h1")!.textContent = "Eko Drive";
+  $("joinnote").textContent = "";
+  document.querySelector(".tag")!.textContent = `Real streets of ${CITY.label}. Plug in your wheel and drive.`;
+  for (const el of document.querySelectorAll<HTMLElement>(".join-box label")) el.style.display = "none";
+}
 const enterBtn = $<HTMLButtonElement>("enter");
 
 world
@@ -204,7 +213,7 @@ world
     scene.add(traffic.group);
     scene.add(createLightPools(world.lamps));
     enterBtn.disabled = false;
-    enterBtn.textContent = meetId ? `Join your padi in ${CITY.label}` : `Enter ${CITY.label}`;
+    enterBtn.textContent = SOLO ? "Start driving" : meetId ? `Join your padi in ${CITY.label}` : `Enter ${CITY.label}`;
     const spot = world.findOpen(world.meta.spawn.x + rand(-6, 6), world.meta.spawn.z + rand(-6, 6));
     me.pos.set(spot.x, 0, spot.z);
     placeCamera(1);
@@ -224,11 +233,14 @@ enterBtn.addEventListener("click", () => {
   audio.start();
   $("join").hidden = true;
   $("hud").hidden = false;
+  if (SOLO) {
+    for (const id of ["online", "invite", "chat", "feed"]) $(id).style.display = "none";
+  }
   $("drivebar").hidden = false;
   if (!CITY.lagosLife) $("drive-danfo").style.display = "none";
   $("chat").hidden = false;
   $("debug").hidden = !DEBUG;
-  net.connect({ zone: ZONE, layer: Number(params.get("layer")) || 1, name: me.name, bio: me.bio, pos: () => me.pos });
+  if (!SOLO) net.connect({ zone: ZONE, layer: Number(params.get("layer")) || 1, name: me.name, bio: me.bio, pos: () => me.pos });
   if (!isTouch) toast("WASD to walk · Shift to run · drag to look around");
   else toast("Left thumb to walk · drag right side to look");
 });
