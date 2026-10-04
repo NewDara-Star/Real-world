@@ -63,8 +63,11 @@ with_timeout() {
 }
 
 echo "… a second Claude is reviewing the push against CLAUDE.md (up to 4 minutes)" >&2
-# Run outside the repo so the reviewer doesn't load this project's hooks.
-if ! out="$(cd /tmp && with_timeout 240 claude -p --output-format text < "$prompt_file" 2>&1)"; then
+# Run outside the repo so the reviewer doesn't load this project's hooks, and
+# without any API key in the environment: the review runs on the owner's
+# claude.ai login, never on a key that belongs to another project.
+if ! out="$(cd /tmp && with_timeout 240 env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
+    claude -p --output-format text < "$prompt_file" 2>&1)"; then
   rm -f "$prompt_file"
   echo "⚠ review couldn't run (claude exited with an error or timed out); pushing without it:" >&2
   echo "$out" | tail -5 >&2
