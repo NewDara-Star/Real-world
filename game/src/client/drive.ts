@@ -3,6 +3,7 @@ import { createVertexColorMaterial } from "./facade";
 import { templateGeometry, makeTemplate } from "./props";
 import { carTemplate, danfoTemplate } from "./traffic";
 import type { DriveInput } from "./wheel";
+import { mirrors, type MirrorKind } from "./mirrors";
 import type { World } from "./world";
 
 // Arcade-sim car physics tuned to feel good on a wheel: a bicycle model with
@@ -159,6 +160,31 @@ export class PlayerVehicle {
     ];
     this.cockpitGroup.add(new THREE.Mesh(templateGeometry(makeTemplate(parts)), mat));
 
+    // Mirrors: glass sampling the shared rear view, in a dark housing, each
+    // turned to face the driver's eye.
+    const eye = new THREE.Vector3(c.x, c.y, c.z);
+    const mirror = (kind: MirrorKind, x: number, y: number, z: number, gw: number, gh: number) => {
+      const g = new THREE.Group();
+      g.position.set(x, y, z);
+      const d = eye.clone().sub(g.position);
+      g.rotation.order = "YXZ";
+      g.rotation.y = Math.atan2(d.x, d.z);
+      g.rotation.x = -Math.atan2(d.y, Math.hypot(d.x, d.z));
+      const housing = new THREE.Mesh(templateGeometry(makeTemplate([[new THREE.BoxGeometry(gw + 0.03, gh + 0.03, 0.05).translate(0, 0, -0.03), 0x161616]])), mat);
+      const glass = new THREE.Mesh(new THREE.PlaneGeometry(gw, gh), mirrors.materials[kind]);
+      // Layer 1: the main camera sees the glass, the mirror camera never
+      // does, so a mirror can't sample the image it's being drawn into.
+      glass.layers.set(1);
+      g.add(housing, glass);
+      this.cockpitGroup.add(g);
+    };
+    // Rear-view hangs off the glass about 60 cm ahead of the eyes; wing
+    // mirrors sit outside, just behind the A-pillar so the side window shows them.
+    mirror("rear", 0, c.y + 0.12, c.z + 0.62, 0.25, 0.07);
+    const wx = half + 0.16, wy = c.y - 0.3, wz = c.z + 0.8;
+    mirror("left", wx, wy, wz, 0.21, 0.13);
+    mirror("right", -wx, wy, wz, 0.21, 0.13);
+
     // Wipers: a frame lying in the glass plane, arms pivoting within it.
     const glass = new THREE.Group();
     glass.position.set(0, baseY + 0.03, baseZ - 0.03);
@@ -290,6 +316,13 @@ export class PlayerVehicle {
     this.indicator = v;
     this.indPeak = 0;
     if (v && !this.blinkOn) this.blinkT = 0.36; // light on the very next frame
+  }
+
+  /** Driver's eye in world space (no head check), for the mirror camera. */
+  eye(out: THREE.Vector3) {
+    const c = this.spec.cockpit;
+    const fx = Math.sin(this.yaw), fz = Math.cos(this.yaw);
+    return out.set(this.x + fx * c.z + fz * c.x, c.y, this.z + fz * c.z - fx * c.x);
   }
 
   get speed() {

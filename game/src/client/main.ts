@@ -11,6 +11,7 @@ import { Traffic } from "./traffic";
 import { World, type Place } from "./world";
 import { FLAG_DANFO, FLAG_DRIVING, FLAG_MOVING, FLAG_RUNNING, type MoveState, type PlayerInfo } from "../shared/protocol";
 import { PlayerVehicle, type VehicleKind } from "./drive";
+import { mirrors } from "./mirrors";
 import { templateGeometry } from "./props";
 import { carTemplate, danfoTemplate } from "./traffic";
 import { DriveControls, runCalibration } from "./wheel";
@@ -45,6 +46,7 @@ await gfx.init(QUALITY);
 const renderer = gfx.renderer;
 const scene = gfx.scene;
 const camera = gfx.camera;
+camera.layers.enable(1); // mirror glass
 let fogFar = gfx.fogFar;
 
 // Clock: real Lagos time (WAT, UTC+1) unless ?time=HH[.MM] is given.
@@ -118,6 +120,8 @@ let crashCooldown = 0;
 let lookOffset = 0;
 /** Head check: where the driver's head is turned (radians, + left) and wants to be. */
 let headYaw = 0;
+let frameNo = 0;
+const eyePos = new THREE.Vector3();
 let headTarget = 0;
 if (DEBUG) Object.assign(window, { __me: me, __remotes: remotes, __world: world });
 let online = 1;
@@ -554,6 +558,12 @@ function frame(now: number) {
   placeCamera(dt);
   world.cull(me.pos.x, me.pos.z, fogFar);
   gfx.follow(me.pos.x, me.pos.z);
+  mirrors.active = !!car && cockpit;
+  if (car && cockpit && (gfx.quality !== "medium" || (frameNo & 1) === 0)) {
+    car.eye(eyePos);
+    mirrors.render(gfx.renderer, scene, eyePos.x, eyePos.y, eyePos.z, car.yaw);
+  }
+  frameNo++;
   gfx.render();
   updateLabels(now);
 
@@ -639,7 +649,7 @@ function enterVehicle(kind: VehicleKind) {
   scene.add(car.root);
   me.avatar.root.visible = false;
   me.camYaw = spot.yaw + Math.PI;
-  cockpit = false;
+  setCockpit(car, false);
   drive.read(0); // prime button edges so the key that entered doesn't exit
   $("drive-car").hidden = $("drive-danfo").hidden = true;
   $("drive-exit").hidden = false;
@@ -648,7 +658,7 @@ function enterVehicle(kind: VehicleKind) {
   if (drive.needsCalibration()) toast("Wheel detected 🎮 tap Wheel setup to calibrate it");
   else if (g29.connected || drive.wheelPad()) toast("In P with the parking brake on. Brake, right paddle to D, then gas. Left paddle goes back toward R and P");
   else if (isTouch) toast("Left thumb: up = gas, down = brake, sideways = steer");
-  else toast("Brake (S) then X for Drive, Z back toward R and P · Q/E indicators · L lights · V wipers · B parking brake · C camera · F get out");
+  else toast("Brake (S) then X for Drive, Z back toward R and P · Q/E indicators · L lights · V wipers · B parking brake · hold [ ] head check, ; mirror glance · C camera · F get out");
   // Touch has no gear buttons: start ready to go.
   if (isTouch) {
     car.selector = "D";
@@ -665,6 +675,7 @@ function exitVehicle() {
   me.pos.set(spot.x, 0, spot.z);
   me.yaw = car.yaw;
   me.camYaw = car.yaw + Math.PI;
+  setCockpit(car, false);
   scene.remove(car.root);
   car = null;
   me.avatar.root.visible = true;
@@ -694,7 +705,8 @@ function driveFrame(dt: number, now: number) {
   c.update(dt, inp, world);
   if (c.ticked !== null) audio.tick(c.ticked);
   if (c.wiped) audio.wipe();
-  headTarget = inp.lookBack ? -c.seat * 2.45 : -inp.look * 1.35;
+  // Passenger mirror is ~55 degrees across the car; a glance turns the eyes most of the way.
+  headTarget = inp.lookBack ? -c.seat * 2.45 : inp.glance ? -c.seat * 0.85 : -inp.look * 1.35;
 
   if (traffic) {
     const fx = Math.sin(c.yaw), fz = Math.cos(c.yaw);
@@ -724,10 +736,7 @@ function driveFrame(dt: number, now: number) {
     audio.horn(0.5, 0.5, me.camYaw, c.kind);
     hornCooldown = 0.45;
   }
-  if (inp.camera) {
-    cockpit = !cockpit;
-    c.setCockpit(cockpit);
-  }
+  if (inp.camera) setCockpit(c, !cockpit);
   if (inp.exit) {
     exitVehicle();
     return;
@@ -779,6 +788,15 @@ function updateHeadlights(c: PlayerVehicle | null) {
   headlight.angle = full ? 0.45 : 0.55;
   headlight.distance = full ? 140 : 60;
   headlight.intensity = full ? 70 : 35;
+}
+
+/** Cockpit: wider lens like a real driver's view, speedo moves to the dash. */
+function setCockpit(c: PlayerVehicle, on: boolean) {
+  cockpit = on;
+  c.setCockpit(on);
+  camera.fov = on ? 68 : 60;
+  camera.updateProjectionMatrix();
+  document.body.classList.toggle("cockpit", on);
 }
 
 function placeDriveCamera(dt: number, c: PlayerVehicle) {
@@ -862,7 +880,7 @@ function updateWheelMon(dt: number) {
 g29.onChange = (on) => {
   refreshWheelButton();
   if (on) openWheelMon(true);
-  if (on) toast("Wheel connected 🎮 Paddles: gear · L2/R2: indicators · L3: lights · R3: wipers · Share: hazards · ✕: parking brake · clutch pedal: handbrake · hold d-pad ◀ ▶ to check over your shoulder");
+  if (on) toast("Wheel connected 🎮 Paddles: gear · L2/R2: indicators · L3: lights · R3: wipers · Share: hazards · ✕: parking brake · clutch pedal: handbrake · hold d-pad ◀ ▶ to check over your shoulder, ▲ to glance at the passenger mirror");
 };
 void g29.restore().then(refreshWheelButton);
 $("wheel-connect").addEventListener("click", async () => {

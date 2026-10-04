@@ -119,6 +119,8 @@ html, body {
   display: flex; flex-direction: column; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; pointer-events: none;
 }
 #speedo[hidden] { display: none; }
+/* In the cockpit the cluster sits behind the wheel, clear of both wing mirrors. */
+body.cockpit #speedo { right: 50%; transform: translateX(50%); bottom: 14px; }
 #speedo .sp-row { display: flex; align-items: baseline; gap: 6px; }
 #speedo b { font-size: 30px; min-width: 2ch; text-align: right; }
 #speedo span { font-size: 12px; opacity: 0.8; }

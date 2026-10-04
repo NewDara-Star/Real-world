@@ -30,6 +30,8 @@ export interface DriveInput {
   look: number;
   /** Held: look back over the shoulder (reversing). */
   lookBack: boolean;
+  /** Held: glance at the passenger-side wing mirror. */
+  glance: boolean;
   device: "keyboard" | "gamepad" | "wheel";
 }
 
@@ -190,12 +192,13 @@ export class DriveControls {
     return defaultCalibration(w);
   }
 
-  /** D-pad (0 centred, 1..8 clockwise from up): hold left/right for a head check, down to look back. */
+  /** D-pad (0 centred, 1..8 clockwise from up): hold left/right for a head check, down to look back, up to glance at the passenger mirror. */
   private dpad(d: number, out: DriveInput) {
     if (d === 0) return;
     if (d >= 6 && d <= 8) out.look = -1;
     else if (d >= 2 && d <= 4) out.look = 1;
     if (d >= 4 && d <= 6) out.lookBack = true;
+    if (d === 1) out.glance = true;
   }
 
   /**
@@ -214,7 +217,7 @@ export class DriveControls {
     const out: DriveInput = {
       steer: 0, throttle: 0, brake: 0, handbrake: false, horn: false, camera: false, exit: false,
       shift: 0, indicatorLeft: false, indicatorRight: false, hazards: false, lights: false, wipers: false, parkBrake: false,
-      look: 0, lookBack: false, device: "keyboard",
+      look: 0, lookBack: false, glance: false, device: "keyboard",
     };
     const pressed = new Set<string>();
 
@@ -231,6 +234,7 @@ export class DriveControls {
       out.horn ||= this.tapped.has("h");
       out.look = (k.has("]") ? 1 : 0) - (k.has("[") ? 1 : 0);
       out.lookBack = k.has("\\");
+      out.glance = k.has(";");
     }
 
     let clutch = 0;
