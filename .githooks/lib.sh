@@ -1,4 +1,6 @@
 # Shared helpers for the git hooks. Sourced, not run.
+# A hook must never fail without saying why.
+trap 'rc=$?; echo "✗ $(basename "$0") stopped unexpectedly at line $LINENO (exit $rc). This is a bug in the hook; fix it rather than skipping it." >&2' ERR
 ROOT="$(git rev-parse --show-toplevel)"
 GAME="$ROOT/game"
 STAMP="$(git rev-parse --git-dir)/check-passed"

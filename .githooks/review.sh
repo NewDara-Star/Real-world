@@ -17,8 +17,12 @@ if ! command -v claude >/dev/null 2>&1; then
 fi
 
 messages="$(git log --format='--- %h %s%n%b' "$base..$head")"
-diff="$(git diff --no-color --stat "$base" "$head"; echo; git diff --no-color "$base" "$head" -- . \
-  ':(exclude)*package-lock.json' ':(exclude)game/public/world/*' ':(exclude)*.bin' ':(exclude)*.glb' | head -c 150000)"
+# Code first, then docs, capped so the prompt stays a sensible size. (head
+# closes the pipe early on a big diff; that's expected, not an error.)
+skip=(':(exclude)*package-lock.json' ':(exclude)game/public/world/*' ':(exclude)*.bin' ':(exclude)*.glb' ':(exclude)*.png' ':(exclude)*.jpg')
+diff="$( { git diff --no-color --stat "$base" "$head"; echo;
+  git diff --no-color "$base" "$head" -- . "${skip[@]}" ':(exclude)*.md';
+  git diff --no-color "$base" "$head" -- '*.md'; } | head -c 300000 || true)"
 prompt_file="$(mktemp)"
 cat > "$prompt_file" <<PROMPT
 You are reviewing a push to the Real World driving simulator before it goes to GitHub.
