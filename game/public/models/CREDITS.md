@@ -7,3 +7,11 @@
   the public-domain "Free Concept Car 004" by Unity Fan. Khronos and 3D Commerce
   logos are hidden in the game. Modified at load time: driver controls moved
   to the driver's side.
+
+Street furniture (`lamp_post_led`, `traffic_signal_head`, `traffic_signal_pole`,
+`post_box_pillar`, `bus_stop_pole`, `bus_shelter`, `wheelie_bin`,
+`bollard_steel`, `telecom_cabinet`, `garden_wall_pier`,
+`garden_wall_section_1m`): modelled for this project by
+`tools/assets/build_street_furniture.py`. The wall and cabinet textures are
+the CC0 Poly Haven sets already in `public/tex/` (red_brick_03,
+white_plaster_rough_02, concrete; Rob Tuytel). No other third-party content.

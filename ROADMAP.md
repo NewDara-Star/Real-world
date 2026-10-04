@@ -17,7 +17,7 @@ physics and the driver. `research/15-what-it-takes.md` is the full map.
    240 Hz physics with smoothing, a sprung driver's head, a cockpit field of
    view setting, 1:1 on-screen wheel. Check: Wheel check says "force feedback
    on", "Reverse force feedback" unticked; in G HUB 900°, sensitivity 50,
-   centring spring off. Also still: textures on the real GPU.
+   centring spring off.
 2. **Wheel test page and wheel worker.** Measure direction, dead band, input
    report rate, write latency and hands-off oscillation on the real wheel;
    then move the wheel into a worker at ~500 Hz with torque extrapolated
@@ -75,6 +75,10 @@ physics and the driver. `research/15-what-it-takes.md` is the full map.
     building class, floors and facade colour through the bake (research 16).
 15. Street furniture density from Overture/OSM (4,363 street lamps, bins, bus
     stops, post boxes), trees with wind, front garden walls and hedges.
+    Models built (`tools/assets/build_street_furniture.py`, in `public/models/`):
+    lamp post, signal head and pole, post box, bus stop pole and shelter, wheelie
+    bin, bollard, telecom cabinet, garden wall pier and 1 m section. Not yet
+    placed in the world. Trees and hedges still to build.
 16. Night: a top-down light map for street lamps and every car's headlights
     (overlaps take the brighter, not the sum; research 16), wet-road streaks.
 
@@ -126,6 +130,7 @@ physics and the driver. `research/15-what-it-takes.md` is the full map.
 
 ## Done
 
+- Real textures confirmed on the Mac's GPU (owner)
 - Checks and hooks: `npm run check` (typecheck + pass/fail tests for physics,
   force feedback, traffic, examiner, credits and privacy); git hooks for
   credits, privacy, Story: paragraphs and a second-Claude review on push
