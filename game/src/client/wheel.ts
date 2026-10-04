@@ -1,3 +1,5 @@
+import type { G29 } from "./g29";
+
 // Driving input: steering wheels (Logitech G29 etc.), gamepads (PS5 DualSense,
 // Xbox) and keyboard, through the browser Gamepad API.
 //
@@ -37,6 +39,35 @@ export interface WheelCalibration {
 
 const STORE = "eko-wheel-cal";
 
+/** Logitech PlayStation-family wheels the game knows without calibration. */
+const KNOWN_LOGITECH = /046d.*(c24f|c294|c260|c266|c267)|g29|g923/i;
+
+/**
+ * Zero-setup mapping for known wheels on the Gamepad API path: steering is the
+ * first axis; pedals are the axes that rest at a hard end (+1 or -1), in
+ * report order gas then brake. Used until the player connects over WebHID
+ * (exact, with force feedback) or calibrates manually.
+ */
+function defaultCalibration(p: Gamepad): WheelCalibration | null {
+  if (!KNOWN_LOGITECH.test(p.id)) return null;
+  const pedals: number[] = [];
+  p.axes.forEach((v, i) => {
+    if (i > 0 && Math.abs(Math.abs(v) - 1) < 0.02) pedals.push(i);
+  });
+  if (pedals.length < 2) return null;
+  const [gas, brake] = pedals;
+  return {
+    id: p.id,
+    steer: { axis: 0, left: -1, right: 1 },
+    gas: { axis: gas, rest: p.axes[gas], full: -p.axes[gas] },
+    brake: { axis: brake, rest: p.axes[brake], full: -p.axes[brake] },
+    rotation: 900,
+    horn: 2, // Square
+    camera: 3, // Triangle
+    handbrake: 0, // Cross
+  };
+}
+
 export class DriveControls {
   private keys = new Set<string>();
   private cal: WheelCalibration | null = null;
@@ -45,6 +76,8 @@ export class DriveControls {
   /** Taps latched on keydown so a press shorter than one frame still counts. */
   private tapped = new Set<string>();
   enabled = true;
+  /** Direct WebHID wheel; when connected it takes priority over everything. */
+  g29: G29 | null = null;
 
   constructor() {
     addEventListener("keydown", (e) => {
@@ -86,9 +119,16 @@ export class DriveControls {
     return null;
   }
 
+  /** True when a wheel is plugged in that we can't map without help. */
   needsCalibration(): boolean {
+    if (this.g29?.connected) return false;
     const w = this.wheelPad();
-    return !!w && (!this.cal || this.cal.id !== w.id);
+    return !!w && (!this.cal || this.cal.id !== w.id) && !KNOWN_LOGITECH.test(w.id);
+  }
+
+  private activeCalibration(w: Gamepad): WheelCalibration | null {
+    if (this.cal && this.cal.id === w.id) return this.cal;
+    return defaultCalibration(w);
   }
 
   read(dt: number): DriveInput {
@@ -109,9 +149,21 @@ export class DriveControls {
       out.horn ||= this.tapped.has("h");
     }
 
-    const wheel = this.wheelPad();
-    if (wheel && this.cal && this.cal.id === wheel.id) {
-      const c = this.cal;
+    const g = this.g29?.connected ? this.g29.state : null;
+    const wheel = g ? null : this.wheelPad();
+    const wcal = wheel ? this.activeCalibration(wheel) : null;
+    if (g) {
+      // Exact hardware values; the G29's 900 degrees map to the car's full lock.
+      out.steer = g.steer;
+      out.throttle = g.gas < 0.02 ? 0 : g.gas;
+      out.brake = g.brake < 0.02 ? 0 : g.brake;
+      out.handbrake ||= g.buttons.cross;
+      out.horn ||= g.buttons.square;
+      if (g.buttons.triangle) pressed.add("g-cam");
+      if (g.buttons.circle) pressed.add("g-exit");
+      out.device = "wheel";
+    } else if (wheel && wcal) {
+      const c = wcal;
       const sx = wheel.axes[c.steer.axis] ?? 0;
       const mid = (c.steer.left + c.steer.right) / 2;
       const half = (c.steer.right - c.steer.left) / 2 || 1;
@@ -144,8 +196,8 @@ export class DriveControls {
 
     const edge = (id: string) => pressed.has(id) && !this.prevButtons.has(id);
     const tap = (key: string) => this.enabled && this.tapped.has(key);
-    out.camera = tap("c") || edge("w-cam") || edge("gp-cam");
-    out.exit = tap("f") || tap("enter") || edge("gp-exit");
+    out.camera = tap("c") || edge("w-cam") || edge("gp-cam") || edge("g-cam");
+    out.exit = tap("f") || tap("enter") || edge("gp-exit") || edge("g-exit");
     this.tapped.clear();
     this.prevButtons = pressed;
     return out;

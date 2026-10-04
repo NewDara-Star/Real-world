@@ -12,7 +12,8 @@ A walkable, multiplayer slice of real Yaba, Lagos, in the browser. No download, 
 
 Tap **🚗 Drive** or **🚐 Danfo** (or press **F**) near a road. Chase and cockpit cameras (**C**).
 
-- **Steering wheel (Logitech G29 etc.) in Chrome:** plug it in, press any pedal or button once so Chrome exposes it, then **🎮 Wheel setup** and follow the steps (turn, gas, brake, then pick horn/camera/handbrake buttons). Saved per browser. No force feedback in the browser.
+- **Logitech G29 / G923 (PlayStation) in Chrome or Edge:** click **🎮 Connect wheel** and pick the wheel. No calibration: the game talks to the wheel directly over WebHID using the known G29 protocol (from the Linux `hid-lg4ff` driver and the CC0 `logitech-g29` library), sets 900° rotation, and drives **force feedback** (speed-sensitive centring, crash jolts, road buzz) and the **rev-light LEDs**. ✕ handbrake · □ horn · △ camera · ○ get out. Even without connecting, a G29 works through the normal gamepad path with a built-in default mapping (no force feedback).
+- **Other wheels:** **🎮 Set up wheel** appears only for wheels the game can't map itself, with a short guided setup.
 - **PS5 / Xbox controller:** works without setup. Left stick steers, R2 gas, L2 brake, Cross/A handbrake, Square/X horn, Triangle/Y camera, Circle/B get out.
 - **Keyboard:** W/S gas and brake (hold S when stopped to reverse), A/D steer, Space handbrake, H horn, C camera, F get out.
 - **Phone:** left thumb up = gas, down = brake, sideways = steer.

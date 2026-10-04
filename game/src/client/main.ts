@@ -10,6 +10,7 @@ import { PlayerVehicle, type VehicleKind } from "./drive";
 import { templateGeometry } from "./props";
 import { carTemplate, danfoTemplate } from "./traffic";
 import { DriveControls, runCalibration } from "./wheel";
+import { G29 } from "./g29";
 
 // ---------------------------------------------------------------- setup ----
 
@@ -103,6 +104,10 @@ function remoteCarGeo(color: number) {
 
 // Driving state.
 const drive = new DriveControls();
+const g29 = new G29();
+drive.g29 = g29;
+let ffbJolt = 0; // decaying crash/kerb force, -1..1
+let ffbPhase = 0;
 let car: PlayerVehicle | null = null;
 let cockpit = false;
 let hornCooldown = 0;
@@ -622,6 +627,7 @@ function exitVehicle() {
   car = null;
   me.avatar.root.visible = true;
   audio.drive(false, "car", 0, 0, 0, 0);
+  void g29.release();
   $("drive-car").hidden = $("drive-danfo").hidden = false;
   $("drive-exit").hidden = true;
   $("speedo").hidden = true;
@@ -650,6 +656,18 @@ function driveFrame(dt: number, now: number) {
   if (c.impact > 1.5 && crashCooldown <= 0) {
     audio.crash(Math.min(1, c.impact / 14));
     crashCooldown = 0.4;
+    // Jolt the wheel away from the side that hit.
+    ffbJolt = (c.vr >= 0 ? 1 : -1) * Math.min(1, c.impact / 10);
+  }
+  if (g29.connected) {
+    // Power-steering feel: light when parked, firmer with speed, lighter when sliding.
+    void g29.setSpring(Math.min(0.85, 0.12 + c.speed / 30) * (1 - c.slip * 0.6));
+    // Road texture: a faint buzz that grows with speed, plus any crash jolt.
+    ffbPhase += dt * (8 + c.speed * 1.5);
+    const buzz = c.speed > 2 ? Math.sin(ffbPhase) * Math.min(0.06, c.speed / 400) : 0;
+    ffbJolt *= Math.pow(0.002, dt);
+    void g29.setForce(Math.abs(ffbJolt) > 0.02 ? ffbJolt : buzz);
+    void g29.setRevLights(c.rpm > 0.35 ? (c.rpm - 0.35) / 0.6 : 0);
   }
   if (inp.horn && hornCooldown <= 0) {
     audio.horn(0.5, 0.5, me.camYaw, c.kind);
@@ -713,10 +731,26 @@ addEventListener("keydown", (e) => {
   if (!car && (e.key === "f" || e.key === "F")) enterVehicle("car");
 });
 
-// Show "Wheel setup" whenever a steering wheel is plugged in.
+// "Connect wheel" (exact G29 driver with force feedback) when the browser
+// supports WebHID; manual setup only for wheels we can't map ourselves.
 function refreshWheelButton() {
-  $("wheel-setup").hidden = !drive.wheelPad();
+  $("wheel-connect").hidden = isTouch || !G29.supported() || g29.connected;
+  $("wheel-setup").hidden = !drive.needsCalibration();
 }
+g29.onChange = (on) => {
+  refreshWheelButton();
+  if (on) toast("G29 connected 🎮 force feedback on. ✕ handbrake · □ horn · △ camera · ○ get out");
+};
+void g29.restore().then(refreshWheelButton);
+$("wheel-connect").addEventListener("click", async () => {
+  try {
+    const ok = await g29.connect();
+    if (!ok && !g29.connected) toast("Switching the wheel to full mode… it will re-centre, then you're good");
+  } catch {
+    toast("Couldn't open the wheel. Close other apps using it (like G HUB games) and try again");
+  }
+});
+addEventListener("pagehide", () => void g29.release());
 addEventListener("gamepadconnected", refreshWheelButton);
 addEventListener("gamepaddisconnected", refreshWheelButton);
 setInterval(refreshWheelButton, 2000);
