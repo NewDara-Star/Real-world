@@ -1,5 +1,5 @@
 import * as THREE from "three/webgpu";
-import { Fn, If, abs, attribute, cameraViewMatrix, dot, float, floor, fract, fwidth, max, min, mix, mod, normalize, normalWorld, positionWorld, select, sin, smoothstep, step, texture, uniform, vec2, vec3, vec4 } from "three/tsl";
+import { Fn, If, abs, attribute, cameraViewMatrix, int, dot, float, floor, fract, fwidth, max, min, mix, mod, normalize, normalWorld, positionWorld, select, sin, smoothstep, step, texture, uniform, vec2, vec3, vec4 } from "three/tsl";
 
 // One shared PBR material for the whole city. Each vertex carries a `facade`
 // attribute (u, v, code, ao). With real textures loaded (CC0 photo scans,
@@ -32,26 +32,35 @@ export const FACADE_LAMP = -8;
 export const FACADE_TILE = -9;
 export const FACADE_PATH = -10;
 
-/** One real-world texture set (CC0 photo-scanned), sampled in metres. */
+/** One real-world texture set (CC0 photo-scanned): a layer in the shared texture arrays. */
 export interface TexSet {
-  albedo: THREE.Texture;
-  normal: THREE.Texture;
-  rough: THREE.Texture;
+  layer: number;
   /** Metres one tile covers (width, height). */
   metres: [number, number];
   /** Average linear albedo, so textures add detail without shifting each building's own colour. */
   avg: THREE.Vector3;
 }
 export type TexRole = "asphalt" | "footpath" | "brick" | "render" | "plaster" | "rooftile" | "zinc" | "laterite" | "concrete" | "grass";
-export type CityTextures = Partial<Record<TexRole, TexSet>>;
+/**
+ * All sets packed into two texture arrays (colour; normal + roughness in
+ * alpha). Shaders may bind only 16 textures, so one image per map fails.
+ */
+export interface CityTextures {
+  albedo: THREE.DataArrayTexture;
+  nr: THREE.DataArrayTexture;
+  sets: Partial<Record<TexRole, TexSet>>;
+}
+
+let ARRAYS: { albedo: THREE.DataArrayTexture; nr: THREE.DataArrayTexture } | null = null;
 
 /** Sample a texture set at a position in metres: detail colour (around 1), roughness, tangent-space normal. */
 const sampleSet = (t: TexSet, m: N, contrast = 1) => {
   const uv = m.div(vec2(t.metres[0], t.metres[1]));
+  const nr = texture(ARRAYS!.nr, uv).depth(int(t.layer));
   return {
-    a: mix(vec3(1), texture(t.albedo, uv).rgb.div(vec3(t.avg.x, t.avg.y, t.avg.z)), contrast),
-    r: texture(t.rough, uv).r,
-    n: texture(t.normal, uv).rgb.mul(2).sub(1),
+    a: mix(vec3(1), texture(ARRAYS!.albedo, uv).depth(int(t.layer)).rgb.div(vec3(t.avg.x, t.avg.y, t.avg.z)), contrast),
+    r: nr.a,
+    n: nr.rgb.mul(2).sub(1),
   };
 };
 
@@ -113,11 +122,11 @@ const makeSurface = (tex: CityTextures | null) => Fn(() => {
     const bx = fract(u.div(bay));
     // Fade fine detail before it aliases into noise at distance.
     const fine = float(1).sub(smoothstep(0.05, 0.18, fwidth(u).add(fwidth(h))));
-    if (tex?.brick && tex.render && tex.plaster) {
+    if (tex?.sets.brick && tex.sets.render && tex.sets.plaster) {
       // Dublin: red brick for brick-coloured houses, roughcast render for the
       // rest. Lagos: painted plaster. Each tinted by the building's own colour.
       const at = vec2(u, h);
-      const br = sampleSet(tex.brick, at), rd = sampleSet(tex.render, at, 0.55), pl = sampleSet(tex.plaster, at, 0.8);
+      const br = sampleSet(tex.sets.brick, at), rd = sampleSet(tex.sets.render, at, 0.55), pl = sampleSet(tex.sets.plaster, at, 0.8);
       const isBrick = step(1.35, base.r.div(base.g.add(0.001))).mul(styleUniform);
       c.assign(base.mul(mix(pl.a, mix(rd.a, br.a, isBrick), styleUniform)));
       rough.assign(mix(mix(pl.r, rd.r, styleUniform), br.r, isBrick));
@@ -184,14 +193,14 @@ const makeSurface = (tex: CityTextures | null) => Fn(() => {
       const kf = float(1).sub(smoothstep(0.15, 0.5, fwidth(fac.x)));
       const lagosKerb = mix(vec3(0.53, 0.45, 0.1), mix(vec3(0.96, 0.8, 0.1), vec3(0.09), step(0.5, fract(fac.x.div(1.2)))), kf);
       const dublinKerb = vec3(0.62, 0.62, 0.6).toVar();
-      if (tex?.concrete) dublinKerb.assign(dublinKerb.mul(sampleSet(tex.concrete, vec2(xz.x.add(xz.y), positionWorld.y)).a));
+      if (tex?.sets.concrete) dublinKerb.assign(dublinKerb.mul(sampleSet(tex.sets.concrete, vec2(xz.x.add(xz.y), positionWorld.y)).a));
       c.assign(mix(lagosKerb, dublinKerb, styleUniform));
       rough.assign(0.75);
     })
     .ElseIf(code.lessThan(-2.5).and(code.greaterThan(-4.5)), () => {
       // Asphalt: grain, patched repairs, worn wheel tracks and the odd pothole.
-      if (tex?.asphalt) {
-        const a = sampleSet(tex.asphalt, vec2(xz.x, xz.y.negate()));
+      if (tex?.sets.asphalt) {
+        const a = sampleSet(tex.sets.asphalt, vec2(xz.x, xz.y.negate()));
         c.assign(c.mul(a.a));
       } else {
         const grain = vnoise(xz.mul(2.3)).mul(0.5).add(vnoise(xz.mul(9)).mul(0.5));
@@ -218,15 +227,15 @@ const makeSurface = (tex: CityTextures | null) => Fn(() => {
       const lagosGround = mix(c, vec3(0.72, 0.47, 0.33), smoothstep(0.45, 0.75, n).mul(0.55));
       const grass = mix(vec3(0.3, 0.46, 0.2), vec3(0.4, 0.52, 0.24), n).mul(vnoise(xz.mul(1.3)).mul(0.15).add(0.9)).toVar();
       const ground = lagosGround.toVar();
-      if (tex?.grass) grass.assign(grass.mul(sampleSet(tex.grass, vec2(xz.x, xz.y.negate())).a));
-      if (tex?.laterite) ground.assign(mix(c, vec3(0.62, 0.38, 0.26), smoothstep(0.35, 0.7, n).mul(0.6)).mul(sampleSet(tex.laterite, vec2(xz.x, xz.y.negate())).a));
+      if (tex?.sets.grass) grass.assign(grass.mul(sampleSet(tex.sets.grass, vec2(xz.x, xz.y.negate())).a));
+      if (tex?.sets.laterite) ground.assign(mix(c, vec3(0.62, 0.38, 0.26), smoothstep(0.35, 0.7, n).mul(0.6)).mul(sampleSet(tex.sets.laterite, vec2(xz.x, xz.y.negate())).a));
       c.assign(mix(ground, grass, styleUniform));
       c.assign(c.mul(vnoise(xz.mul(0.7)).mul(0.1).add(0.91)));
       rough.assign(1);
     })
     .ElseIf(code.lessThan(-5.5).and(code.greaterThan(-6.5)), () => {
-      if (tex?.zinc) {
-        const z = sampleSet(tex.zinc, roofUV());
+      if (tex?.sets.zinc) {
+        const z = sampleSet(tex.sets.zinc, roofUV());
         c.assign(c.mul(z.a));
         rough.assign(z.r);
         return;
@@ -242,8 +251,8 @@ const makeSurface = (tex: CityTextures | null) => Fn(() => {
       rough.assign(mix(float(0.45), float(0.85), rust));
     })
     .ElseIf(code.lessThan(-8.5).and(code.greaterThan(-9.5)), () => {
-      if (tex?.rooftile) {
-        const t = sampleSet(tex.rooftile, roofUV());
+      if (tex?.sets.rooftile) {
+        const t = sampleSet(tex.sets.rooftile, roofUV());
         c.assign(c.mul(t.a));
         rough.assign(t.r);
         return;
@@ -258,14 +267,14 @@ const makeSurface = (tex: CityTextures | null) => Fn(() => {
     })
     .ElseIf(code.lessThan(-9.5).and(code.greaterThan(-10.5)), () => {
       // Footpath: concrete paving slabs.
-      if (tex?.footpath) {
-        const f = sampleSet(tex.footpath, vec2(xz.x, xz.y.negate()));
+      if (tex?.sets.footpath) {
+        const f = sampleSet(tex.sets.footpath, vec2(xz.x, xz.y.negate()));
         c.assign(c.mul(f.a));
         rough.assign(f.r);
       } else c.assign(c.mul(vnoise(xz.mul(0.8)).mul(0.1).add(0.9)));
     })
     .ElseIf(code.lessThan(-6.5), () => {
-      if (tex?.concrete) c.assign(c.mul(sampleSet(tex.concrete, vec2(xz.x, xz.y.negate())).a));
+      if (tex?.sets.concrete) c.assign(c.mul(sampleSet(tex.sets.concrete, vec2(xz.x, xz.y.negate())).a));
       c.assign(c.mul(vnoise(xz.mul(0.8)).mul(0.14).add(0.86)));
       rough.assign(0.95);
     });
@@ -314,34 +323,34 @@ const makeNormal = (tex: CityTextures) => Fn(() => {
     nw.assign(normalize(vec3(n.x.mul(strength), n.z, n.y.mul(strength).negate())));
   };
   If(code.greaterThanEqual(0), () => {
-    if (!tex.brick || !tex.render || !tex.plaster) return;
+    if (!tex.sets.brick || !tex.sets.render || !tex.sets.plaster) return;
     const at = vec2(fac.x, fac.y);
     const isBrick = step(1.35, base.r.div(base.g.add(0.001))).mul(styleUniform);
-    const n = mix(sampleSet(tex.plaster, at).n, mix(sampleSet(tex.render, at).n, sampleSet(tex.brick, at).n, isBrick), styleUniform).toVar();
+    const n = mix(sampleSet(tex.sets.plaster, at).n, mix(sampleSet(tex.sets.render, at).n, sampleSet(tex.sets.brick, at).n, isBrick), styleUniform).toVar();
     // Glass, doors and shutters stay flat.
     const flat = openings(fac.x, fac.y, code);
     n.assign(mix(n, vec3(0, 0, 1), flat));
     const T = normalize(vec3(N.z.negate(), 0, N.x).add(vec3(1e-4, 0, 0)));
     nw.assign(normalize(T.mul(n.x).add(vec3(0, 1, 0).mul(n.y)).add(N.mul(n.z))));
   })
-    .ElseIf(code.lessThan(-2.5).and(code.greaterThan(-4.5)), () => ground(tex.asphalt, 0.8))
+    .ElseIf(code.lessThan(-2.5).and(code.greaterThan(-4.5)), () => ground(tex.sets.asphalt, 0.8))
     .ElseIf(code.lessThan(-4.5).and(code.greaterThan(-5.5)), () => {
-      if (tex.grass && tex.laterite) {
+      if (tex.sets.grass && tex.sets.laterite) {
         const at = vec2(xz.x, xz.y.negate());
-        const n = mix(sampleSet(tex.laterite, at).n, sampleSet(tex.grass, at).n, styleUniform);
+        const n = mix(sampleSet(tex.sets.laterite, at).n, sampleSet(tex.sets.grass, at).n, styleUniform);
         nw.assign(normalize(vec3(n.x, n.z, n.y.negate())));
       }
     })
-    .ElseIf(code.lessThan(-9.5).and(code.greaterThan(-10.5)), () => ground(tex.footpath, 1))
+    .ElseIf(code.lessThan(-9.5).and(code.greaterThan(-10.5)), () => ground(tex.sets.footpath, 1))
     .ElseIf(code.lessThan(-5.5).and(code.greaterThan(-6.5)).or(code.lessThan(-8.5).and(code.greaterThan(-9.5))), () => {
       const t = code.greaterThan(-6.5);
-      if (!tex.zinc || !tex.rooftile) return;
-      const n = mix(sampleSet(tex.rooftile, roofUV()).n, sampleSet(tex.zinc, roofUV()).n, select(t, float(1), float(0)));
+      if (!tex.sets.zinc || !tex.sets.rooftile) return;
+      const n = mix(sampleSet(tex.sets.rooftile, roofUV()).n, sampleSet(tex.sets.zinc, roofUV()).n, select(t, float(1), float(0)));
       const T = normalize(vec3(N.z.negate(), 0, N.x).add(vec3(1e-4, 0, 0)));
       const B = normalize(vec3(0, 1, 0).sub(N.mul(N.y)).add(vec3(0, 1e-4, 0)));
       nw.assign(normalize(T.mul(n.x).add(B.mul(n.y)).add(N.mul(n.z))));
     })
-    .ElseIf(code.lessThan(-6.5).and(code.greaterThan(-7.5)), () => ground(tex.concrete, 1));
+    .ElseIf(code.lessThan(-6.5).and(code.greaterThan(-7.5)), () => ground(tex.sets.concrete, 1));
   return normalize(cameraViewMatrix.mul(vec4(nw, 0)).xyz);
 });
 
@@ -381,6 +390,7 @@ const nightGlow = Fn(() => {
 
 export function createWorldMaterial(tex: CityTextures | null = null): THREE.MeshStandardNodeMaterial {
   const mat = new THREE.MeshStandardNodeMaterial();
+  ARRAYS = tex ? { albedo: tex.albedo, nr: tex.nr } : null;
   const s = makeSurface(tex)();
   if (tex) mat.normalNode = makeNormal(tex)();
   mat.colorNode = s.xyz;
