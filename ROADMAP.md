@@ -70,6 +70,22 @@ physics and the driver. `research/15-what-it-takes.md` is the full map.
 16. Night: a top-down light map for street lamps and every car's headlights
     (overlaps take the brighter, not the sum; research 16), wet-road streaks.
 
+## From the city teardowns (research 16–18), slotted in when their item comes up
+
+- World data and bake: footpath widths measured from the building line; an
+  automatic accuracy report from `add_place.py` (what matched, what's
+  missing); a provenance table of every data source and its licence; a
+  population-density grid (Meta or WorldPop, licence to check) for
+  pedestrians, parked cars and people per building from floor area; land use
+  mapped by how people use it.
+- Look: building style per neighbourhood, not per city, with notes on
+  Finglas house types; street furniture as culled instances with a separate
+  shadow set.
+- Lagos: clamp road widths to the gap between building frontages (road class
+  is unreliable there).
+- Process: before/after URL flags for visual changes (removed once decided),
+  and headless triangle-count and z-fighting checks.
+
 ## Then
 
 17. Lagos polish (danfos, keke, okada behaviour, power cuts), then new places

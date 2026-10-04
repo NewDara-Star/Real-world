@@ -21,6 +21,6 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     fi
     run_checks "$(git rev-parse "$local_sha^{tree}")"
   fi
-  "$(dirname "$0")/review.sh" "$base" "$local_sha"
+  "$(dirname "$0")/review.sh" "$base" "$local_sha" || exit 1 # a block, already explained
 done
 exit 0
