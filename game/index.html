@@ -45,6 +45,48 @@
       <div id="prnd"><b data-g="P">P</b><b data-g="R">R</b><b data-g="N">N</b><b data-g="D">D</b></div>
       <div class="tt"><i id="tt-park" title="Parking brake">(P)</i><i id="tt-lights" title="Headlights">◐</i><i id="tt-wipers" title="Wipers"></i></div>
     </div>
+    <canvas id="minimap" width="440" height="440" hidden></canvas>
+    <div id="navbar" hidden>
+      <i id="nav-icon">↑</i>
+      <div><b id="nav-dist"></b><span id="nav-text"></span></div>
+    </div>
+    <div id="bigmap" hidden>
+      <canvas id="bigmap-canvas"></canvas>
+      <div class="bigmap-side">
+        <div class="bigmap-head"><b>Map</b><button id="map-close" aria-label="Close map">✕</button></div>
+        <input id="map-search" placeholder="Search a place or street…" autocomplete="off" />
+        <ul id="map-results"></ul>
+        <p class="bigmap-hint">Search, or click anywhere on the map to set a destination. Scroll to zoom, drag to move. M closes.</p>
+        <button id="map-clear">Clear route</button>
+      </div>
+    </div>
+    <div id="pause" hidden>
+      <div class="pause-box">
+        <h2>Paused</h2>
+        <button id="pause-resume" class="primary">Resume</button>
+        <button id="pause-map">🗺️ Map and sat-nav</button>
+        <button id="pause-world">🌍 World map</button>
+        <details>
+          <summary>Controls</summary>
+          <table class="keys">
+            <tr><th></th><th>Wheel</th><th>Keyboard</th></tr>
+            <tr><td>Gear toward D / P</td><td>Right / left paddle</td><td>X / Z</td></tr>
+            <tr><td>Indicators</td><td>L2 / R2</td><td>Q / E</td></tr>
+            <tr><td>Headlights</td><td>L3</td><td>L</td></tr>
+            <tr><td>Wipers</td><td>R3</td><td>V</td></tr>
+            <tr><td>Hazards</td><td>Share</td><td>K</td></tr>
+            <tr><td>Parking brake</td><td>✕</td><td>B</td></tr>
+            <tr><td>Handbrake (hold)</td><td>Clutch pedal</td><td>Space</td></tr>
+            <tr><td>Head check</td><td>Hold d-pad ◀ ▶</td><td>Hold [ ]</td></tr>
+            <tr><td>Look back / passenger mirror</td><td>D-pad ▼ / ▲</td><td>\ / ;</td></tr>
+            <tr><td>Horn / camera / get out</td><td>□ / △ / ○</td><td>H / C / F</td></tr>
+            <tr><td>Map and sat-nav</td><td>+ button</td><td>M</td></tr>
+            <tr><td>Pause</td><td>Options</td><td>Esc or P</td></tr>
+          </table>
+        </details>
+        <p class="pause-hint">Options (or Esc) to resume</p>
+      </div>
+    </div>
     <div id="exam" hidden>
       <div class="ex-head"><b>Examiner</b><span id="ex-tally"></span></div>
       <ol id="ex-feed"></ol>

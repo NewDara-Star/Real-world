@@ -77,6 +77,8 @@ export class World {
   private edges = new Map<number, number[]>(); // grid cell -> flat [ax,az,bx,bz,...] wall edges
   private roadGrid = new Map<number, RoadSeg[]>();
   private footprints = new Map<number, Float32Array[]>();
+  /** Every building outline (x, z pairs), for the map. */
+  footprintList: Float32Array[] = [];
   /** Lane-level road rules, where the place has been baked through SUMO. */
   net: RoadNet | null = null;
   /** Real-world texture sets, or null for the procedural look. */
@@ -146,6 +148,7 @@ export class World {
       }
     }
     for (const b of buildings) this.indexBuilding(b.pts);
+    this.footprintList = buildings.map((b) => b.pts);
 
     // ---- build chunk geometry ----
     const chunkBuilders = new Map<string, Builder>();
@@ -713,14 +716,27 @@ export class Builder {
     for (const t of tris) this.idx.push(base + t[0], base + t[1], base + t[2], base + t[0], base + t[2], base + t[1]);
   }
 
+  /**
+   * The ground under the whole city, as a grid of 50 m tiles a few cm below
+   * road level. One giant quad loses depth precision near a low camera and
+   * grass shows through the road.
+   */
   groundQuad(hx: number, hz: number, hex: number) {
     this.n = [0, 1, 0];
     const c = this.c.setHex(hex);
-    const a = this.vert(-hx, 0, -hz, c, 1, 0, 0, FACADE_GROUND);
-    const b = this.vert(hx, 0, -hz, c, 1, 0, 0, FACADE_GROUND);
-    const d = this.vert(hx, 0, hz, c, 1, 0, 0, FACADE_GROUND);
-    const f = this.vert(-hx, 0, hz, c, 1, 0, 0, FACADE_GROUND);
-    this.idx.push(a, f, d, a, d, b);
+    const tile = 50;
+    const nx = Math.ceil((hx * 2) / tile), nz = Math.ceil((hz * 2) / tile);
+    const y = -0.04;
+    const base = this.pos.length / 3;
+    for (let j = 0; j <= nz; j++) {
+      for (let i = 0; i <= nx; i++) this.vert(-hx + Math.min(hx * 2, i * tile), y, -hz + Math.min(hz * 2, j * tile), c, 1, 0, 0, FACADE_GROUND);
+    }
+    for (let j = 0; j < nz; j++) {
+      for (let i = 0; i < nx; i++) {
+        const a = base + j * (nx + 1) + i, b = a + 1, f = a + nx + 1, d = f + 1;
+        this.idx.push(a, f, d, a, d, b);
+      }
+    }
   }
 
   /** Stamp a prop template (non-indexed triangles with baked colours). */

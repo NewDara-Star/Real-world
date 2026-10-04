@@ -10,8 +10,10 @@ import { Net } from "./net";
 import { Traffic } from "./traffic";
 import { NetTraffic } from "./trafficnet";
 import { RoadSigns } from "./roadsigns";
-import { ALLOW_CAR, LaneKind } from "./roadnet";
+import { ALLOW_CAR, ALLOW_SERVICE, LaneKind } from "./roadnet";
 import { Examiner, type Fault } from "./rules";
+import { Navigator } from "./nav";
+import { MapView } from "./map";
 import { World, type Place } from "./world";
 import { FLAG_DANFO, FLAG_DRIVING, FLAG_MOVING, FLAG_RUNNING, type MoveState, type PlayerInfo } from "../shared/protocol";
 import { PlayerVehicle, type VehicleKind } from "./drive";
@@ -67,6 +69,8 @@ scene.add(world.group);
 let traffic: Traffic | NetTraffic | null = null;
 let signs: RoadSigns | null = null;
 let examiner: Examiner | null = null;
+let navigator_: Navigator | null = null;
+let mapView: MapView | null = null;
 const audio = new StreetAudio();
 
 const me = {
@@ -230,6 +234,7 @@ world
       ? new NetTraffic(world.net, honk, isTouch ? { vehicles: 30, walkers: 50 } : { vehicles: 70, walkers: 110 })
       : new Traffic(world, honk, isTouch ? { vehicles: 24, walkers: 30 } : { vehicles: 40, walkers: 60 });
     if (DEBUG) Object.assign(window, { __traffic: traffic });
+    if (DEBUG) setTimeout(() => Object.assign(window, { __nav: navigator_ }), 0);
     if (world.net) {
       signs = new RoadSigns(world.net, CITY.drive);
       scene.add(signs.group);
@@ -237,7 +242,13 @@ world
         examiner = new Examiner(world.net, traffic);
         examiner.onFault = showFault;
       }
+      navigator_ = new Navigator(world.net);
+      scene.add(navigator_.arrows);
+      navigator_.onReroute = () => say("Rerouting");
     }
+    mapView = new MapView(world, world.net, navigator_);
+    mapView.onDestination = setDestination;
+    $("minimap").hidden = false;
     scene.add(traffic.group);
     scene.add(createLightPools(world.lamps));
     enterBtn.disabled = false;
@@ -521,6 +532,13 @@ function frame(now: number) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
   if (!world.meta) return;
+  pollPauseButton();
+  if (mapView?.open) return; // the map covers the screen; nothing to simulate or draw
+  if (paused) {
+    // Frozen: keep drawing the scene but advance nothing.
+    gfx.render();
+    return;
+  }
 
   if (car) {
     driveFrame(dt, now);
@@ -581,6 +599,7 @@ function frame(now: number) {
   }
   placeCamera(dt);
   world.cull(me.pos.x, me.pos.z, fogFar);
+  updateNav(dt);
   gfx.follow(me.pos.x, me.pos.z);
   mirrors.active = !!car && cockpit && !params.has("nomirror");
   if (car && cockpit && (gfx.quality !== "medium" || (frameNo & 1) === 0)) {
@@ -698,15 +717,17 @@ function enterVehicle(kind: VehicleKind) {
 function laneSpot(x: number, z: number) {
   const net = world.net;
   if (!net) return null;
-  let best: { x: number; z: number; yaw: number } | null = null, bd = 60;
+  let best: { x: number; z: number; yaw: number } | null = null, bd = 90;
   for (const l of net.lanes) {
-    if (l.kind !== LaneKind.Road || !(l.allow & ALLOW_CAR) || l.length < 8) continue;
+    if (l.kind !== LaneKind.Road || !(l.allow & ALLOW_CAR) || l.length < 30) continue;
     for (let k = 0; k + 3 < l.pts.length; k += 2) {
       const ax = l.pts[k], az = l.pts[k + 1], bx = l.pts[k + 2], bz = l.pts[k + 3];
       const dx = bx - ax, dz = bz - az, len2 = dx * dx + dz * dz || 1;
       const t = Math.max(0.1, Math.min(0.9, ((x - ax) * dx + (z - az) * dz) / len2));
+      // Leave some road ahead (not nose-first at a dead end), and prefer real streets to car parks.
+      if (l.length - (l.cum[k / 2] + Math.sqrt(len2) * t) < 25) continue;
       const px = ax + dx * t, pz = az + dz * t;
-      const d = Math.hypot(x - px, z - pz);
+      const d = Math.hypot(x - px, z - pz) + (l.allow & ALLOW_SERVICE ? 20 : 0);
       if (d < bd) {
         bd = d;
         best = { x: px, z: pz, yaw: Math.atan2(dx, dz) };
@@ -1007,6 +1028,125 @@ $("wheel-setup").addEventListener("click", async () => {
   }
   setTimeout(() => (box.hidden = true), 2500);
 });
+
+// ------------------------------------------------------------ sat-nav ----
+
+const spoken = new Set<string>();
+function say(text: string) {
+  try {
+    if (!("speechSynthesis" in window) || audio.muted) return;
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = CITY.style === "dublin" ? "en-IE" : "en-GB";
+    u.rate = 1.02;
+    speechSynthesis.cancel();
+    speechSynthesis.speak(u);
+  } catch {
+    // no voice available
+  }
+}
+function setDestination(d: { x: number; z: number; name: string } | null) {
+  if (!navigator_) return;
+  spoken.clear();
+  if (!d) {
+    navigator_.clear();
+    $("navbar").hidden = true;
+    return;
+  }
+  const x = car ? car.x : me.pos.x, z = car ? car.z : me.pos.z, yaw = car ? car.yaw : me.yaw;
+  if (navigator_.route(x, z, yaw, d)) {
+    const km = navigator_.total / 1000;
+    toast(`Route to ${d.name}: ${km < 1 ? `${Math.round(navigator_.total)} m` : `${km.toFixed(1)} km`}`);
+    say(`Route set to ${d.name}`);
+  } else toast(`Couldn't find a road route to ${d.name}`);
+}
+const NAV_ICON: Record<string, string> = { left: "↰", right: "↱", "slight-left": "↖", "slight-right": "↗", straight: "↑", uturn: "↶", arrive: "🏁" };
+let miniTimer = 0;
+function updateNav(dt: number) {
+  const x = car ? car.x : me.pos.x, z = car ? car.z : me.pos.z, yaw = car ? car.yaw : me.yaw;
+  miniTimer -= dt;
+  if (mapView && miniTimer <= 0) {
+    miniTimer = 1 / 30;
+    mapView.drawMinimap(x, z, yaw, car ? Math.abs(car.vf) : 0);
+  }
+  if (!navigator_?.dest) return;
+  const ins = navigator_.update(dt, x, z, yaw);
+  const bar = $("navbar");
+  bar.hidden = !ins;
+  if (!ins) return;
+  const dist = Math.max(0, ins.at - navigator_.progress);
+  bar.classList.toggle("arrived", navigator_.arrived);
+  $("nav-icon").textContent = NAV_ICON[ins.kind] ?? "↑";
+  $("nav-dist").textContent = navigator_.arrived ? "Arrived" : dist >= 1000 ? `${(dist / 1000).toFixed(1)} km` : `${Math.round(dist / 10) * 10} m`;
+  $("nav-text").textContent = ins.text;
+  // Spoken prompts: once on approach, once at the turn.
+  const key = `${ins.at.toFixed(0)}:${ins.text}`;
+  if (navigator_.arrived) {
+    if (!spoken.has("arrive")) {
+      spoken.add("arrive");
+      say(`You have arrived at ${navigator_.dest?.name ?? "your destination"}`);
+    }
+  } else if (dist < 220 && dist > 60 && !spoken.has(`far${key}`)) {
+    spoken.add(`far${key}`);
+    say(`In ${Math.round(dist / 50) * 50} metres, ${ins.text.charAt(0).toLowerCase()}${ins.text.slice(1)}`);
+  } else if (dist <= 40 && !spoken.has(`near${key}`)) {
+    spoken.add(`near${key}`);
+    say(ins.kind === "straight" ? ins.text : `${ins.text} now`);
+  }
+}
+function toggleMap() {
+  if (!mapView || paused) return;
+  const x = car ? car.x : me.pos.x, z = car ? car.z : me.pos.z, yaw = car ? car.yaw : me.yaw;
+  mapView.toggle(!mapView.open, x, z, yaw);
+  if (!mapView.open) {
+    drive.read(0);
+    last = performance.now();
+  }
+}
+let plusWasDown = false;
+addEventListener("keydown", (e) => {
+  if (document.activeElement === chatInput || (e.target as HTMLElement)?.tagName === "INPUT") return;
+  if (e.key === "m" || e.key === "M") toggleMap();
+});
+$("pause-map").addEventListener("click", () => {
+  setPaused(false);
+  toggleMap();
+});
+
+// ---------------------------------------------------------------- pause ----
+
+let paused = false;
+let optionsWasDown = false;
+function setPaused(on: boolean) {
+  if (paused === on || !me.avatar) return;
+  paused = on;
+  $("pause").hidden = !on;
+  if (on) {
+    audio.drive(false, "car", 0, 0, 0, 0);
+    void g29.setForce(0);
+    $("pause-resume").focus();
+  } else {
+    drive.read(0); // drop taps made while paused
+    last = performance.now();
+  }
+}
+/** Options on the wheel or a pad toggles pause (edge-triggered). */
+function pollPauseButton() {
+  let down = !!(g29.connected && g29.state?.buttons.options);
+  for (const p of navigator.getGamepads?.() ?? []) if (p?.buttons[9]?.pressed) down = true;
+  if (down && !optionsWasDown) setPaused(!paused);
+  optionsWasDown = down;
+  const plus = !!(g29.connected && g29.state?.buttons.plus);
+  if (plus && !plusWasDown) toggleMap();
+  plusWasDown = plus;
+}
+addEventListener("keydown", (e) => {
+  if (document.activeElement === chatInput) return;
+  if ((e.target as HTMLElement)?.tagName === "INPUT") return;
+  if (e.key === "Escape" && mapView?.open) return toggleMap();
+  if (e.key === "Escape" || e.key === "p" || e.key === "P") setPaused(!paused);
+});
+$("pause-resume").addEventListener("click", () => setPaused(false));
+$("pause-world").addEventListener("click", () => $("world").click());
 
 // ---------------------------------------------------------------- utils ----
 
