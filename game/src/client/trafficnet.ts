@@ -235,7 +235,7 @@ export class NetTraffic {
       if (!p.active) continue;
       this.stepPed(p, dt);
     }
-    this.render();
+    this.render(dt);
   }
 
   /** Vehicles within r of (x, z), for the player's physics world. */
@@ -866,7 +866,7 @@ export class NetTraffic {
 
   // ----------------------------------------------------------- render --
 
-  private render() {
+  private render(dt: number) {
     const vc = this.vMeshes.map(() => 0);
     for (const c of this.cars) {
       if (!c.active) continue;
@@ -883,7 +883,8 @@ export class NetTraffic {
     for (const p of this.peds) {
       if (!p.active) continue;
       const moving = p.knocked <= 0 && p.waiting === 0;
-      if (moving) p.phase += 0.016 * p.v * 6;
+      // Stride phase advances with distance walked, so legs keep pace at any frame rate.
+      if (moving) p.phase += dt * p.v * 6;
       const mi = p.kind * 2 + (moving && Math.sin(p.phase) > 0 ? 1 : 0);
       const y = p.lane?.kind === LaneKind.Footpath || p.area ? 0.15 : 0.03;
       if (p.knocked > 0) {
