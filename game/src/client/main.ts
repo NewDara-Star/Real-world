@@ -2,7 +2,7 @@ import * as THREE from "three/webgpu";
 import { StreetAudio } from "./audio";
 import { Graphics, type Quality } from "./graphics";
 import { clockUniform, createVertexColorMaterial, styleUniform } from "./facade";
-import { cityFor, localHours } from "./cities";
+import { localHours, resolveCity } from "./cities";
 import { createLightPools } from "./nightfx";
 import { Avatar } from "./avatar";
 import { Input } from "./input";
@@ -25,7 +25,7 @@ import { G29 } from "./g29";
 
 const params = new URLSearchParams(location.search);
 const DEBUG = params.has("debug");
-const CITY = cityFor(params.get("city"));
+const CITY = await resolveCity(params.get("city"));
 /** Desktop app (or ?solo=1): single player, no server, no chat. */
 const SOLO = params.has("solo") || "ekoDesktop" in window;
 const ZONE = CITY.zone;
@@ -923,6 +923,11 @@ function placeDriveCamera(dt: number, c: PlayerVehicle) {
   camera.lookAt(c.x + fx * 3, 1.3, c.z + fz * 3);
 }
 
+$("world").addEventListener("click", () => {
+  const next = new URLSearchParams();
+  for (const k of ["solo", "debug", "quality"]) if (params.has(k)) next.set(k, params.get(k)!);
+  location.href = `/globe.html?${next}`;
+});
 $("drive-car").addEventListener("click", () => enterVehicle("car"));
 $("drive-danfo").addEventListener("click", () => enterVehicle("danfo"));
 $("drive-exit").addEventListener("click", () => exitVehicle());

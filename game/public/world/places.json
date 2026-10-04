@@ -1,0 +1,48 @@
+[
+ {
+  "zone": "finglas",
+  "label": "Finglas",
+  "country": "Ireland",
+  "style": "dublin",
+  "drive": "left",
+  "tz": "Europe/Dublin",
+  "lon": -6.296,
+  "lat": 53.396,
+  "bbox": [
+   -6.323,
+   53.38,
+   -6.269,
+   53.412
+  ],
+  "blurb": "North Dublin. Home of the Finglas driving test centre.",
+  "stats": {
+   "buildings": 20808,
+   "streets": 364,
+   "places": 231,
+   "roadRules": true
+  }
+ },
+ {
+  "zone": "yaba",
+  "label": "Yaba",
+  "country": "Nigeria",
+  "style": "lagos",
+  "drive": "right",
+  "tz": "Africa/Lagos",
+  "lon": 3.373,
+  "lat": 6.507,
+  "bbox": [
+   3.362,
+   6.494,
+   3.384,
+   6.52
+  ],
+  "blurb": "Mainland Lagos: danfos, kekes and Tejuosho market traffic.",
+  "stats": {
+   "buildings": 14082,
+   "streets": 152,
+   "places": 233,
+   "roadRules": false
+  }
+ }
+]

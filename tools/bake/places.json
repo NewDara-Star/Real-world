@@ -1,0 +1,22 @@
+{
+ "finglas": {
+  "label": "Finglas",
+  "country": "Ireland",
+  "bbox": [-6.323, 53.380, -6.269, 53.412],
+  "style": "dublin",
+  "drive": "left",
+  "tz": "Europe/Dublin",
+  "spawn": "RSA Test Centre",
+  "blurb": "North Dublin. Home of the Finglas driving test centre."
+ },
+ "yaba": {
+  "label": "Yaba",
+  "country": "Nigeria",
+  "bbox": [3.362, 6.494, 3.384, 6.520],
+  "style": "lagos",
+  "drive": "right",
+  "tz": "Africa/Lagos",
+  "spawn": "co-creation",
+  "blurb": "Mainland Lagos: danfos, kekes and Tejuosho market traffic."
+ }
+}

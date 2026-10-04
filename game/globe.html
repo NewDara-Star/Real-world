@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#05070d" />
+    <title>Real World</title>
+    <meta name="description" content="Drive real places, rebuilt from open map data. Pick a place on the globe and go." />
+    <link rel="stylesheet" href="/src/client/globe.css" />
+  </head>
+  <body>
+    <canvas id="globe"></canvas>
+
+    <header class="brand">
+      <h1>Real World</h1>
+      <p>Real places, rebuilt from open map data. Pick one and drive.</p>
+    </header>
+
+    <aside id="places" aria-label="Places you can drive">
+      <h2>Places</h2>
+      <ul id="place-list"></ul>
+      <p class="more">More of the world appears here as each place is mapped.</p>
+    </aside>
+
+    <div id="pins"></div>
+
+    <section id="card" hidden aria-live="polite">
+      <button id="card-close" aria-label="Close">✕</button>
+      <p class="card-country" id="card-country"></p>
+      <h2 id="card-title"></h2>
+      <p id="card-blurb"></p>
+      <ul class="card-stats" id="card-stats"></ul>
+      <p class="card-time" id="card-time"></p>
+      <button id="card-drive">Drive here →</button>
+    </section>
+
+    <p id="loading">Loading the Earth…</p>
+
+    <footer class="credits">
+      Earth imagery: NASA Visible Earth (Blue Marble, Black Marble) · Places: © OpenStreetMap contributors, Overture Maps Foundation
+    </footer>
+    <script type="module" src="/src/client/globe.ts"></script>
+  </body>
+</html>

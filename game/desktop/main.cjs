@@ -35,8 +35,9 @@ function createWindow() {
       backgroundThrottling: false,
     },
   });
-  const city = process.env.EKO_CITY || "finglas";
-  win.loadURL(`app://game/index.html?solo=1&city=${encodeURIComponent(city)}`);
+  // Opens on the world map; EKO_CITY=finglas jumps straight into a place.
+  const city = process.env.EKO_CITY;
+  win.loadURL(city ? `app://game/index.html?solo=1&city=${encodeURIComponent(city)}` : "app://game/globe.html?solo=1");
   win.webContents.on("before-input-event", (event, input) => {
     if (input.type === "keyDown" && (input.key === "F11" || (input.meta && input.control && input.key.toLowerCase() === "f"))) {
       win.setFullScreen(!win.isFullScreen());

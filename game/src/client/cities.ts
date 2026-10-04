@@ -51,6 +51,28 @@ export function cityFor(zone: string | null): City {
   return CITIES[zone ?? ""] ?? CITIES.yaba;
 }
 
+/**
+ * A city by zone name, including places baked after this file was written:
+ * those borrow the look of their style (Dublin or Lagos) and take their
+ * name, traffic side and time zone from the world map list.
+ */
+export async function resolveCity(zone: string | null): Promise<City> {
+  if (zone && CITIES[zone]) return CITIES[zone];
+  if (zone) {
+    try {
+      const list = (await fetch("/world/places.json").then((r) => r.json())) as { zone: string; label: string; style: "lagos" | "dublin"; drive: "left" | "right"; tz: string }[];
+      const p = list.find((q) => q.zone === zone);
+      if (p) {
+        const base = p.style === "dublin" ? CITIES.finglas : CITIES.yaba;
+        return { ...base, zone: p.zone, label: p.label, drive: p.drive, tz: p.tz };
+      }
+    } catch {
+      // fall through
+    }
+  }
+  return CITIES.yaba;
+}
+
 /** Hours (0..24) on the city's real local clock. */
 export function localHours(tz: string): number {
   try {

@@ -1,0 +1,72 @@
+:root {
+  --bg: #05070d;
+  --panel: rgba(12, 16, 26, 0.78);
+  --line: rgba(255, 255, 255, 0.12);
+  --text: #eef2f8;
+  --muted: #9aa6b8;
+  --accent: #ffcf4a;
+  --road: #59d18b;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden; }
+#globe { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+#globe:active { cursor: grabbing; }
+
+.brand { position: fixed; left: 24px; top: 20px; pointer-events: none; }
+.brand h1 { margin: 0; font-size: 28px; letter-spacing: 0.02em; }
+.brand p { margin: 4px 0 0; color: var(--muted); font-size: 14px; max-width: 34ch; }
+
+#places {
+  position: fixed; left: 16px; top: 110px; width: min(280px, calc(100vw - 32px)); max-height: calc(100vh - 170px); overflow: auto;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px; backdrop-filter: blur(8px);
+}
+#places h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+#place-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+#place-list button {
+  width: 100%; text-align: left; background: transparent; border: 1px solid transparent; color: var(--text); border-radius: 10px;
+  padding: 8px 10px; cursor: pointer; font: inherit; display: grid; grid-template-columns: 1fr auto; gap: 2px 8px;
+}
+#place-list button:hover, #place-list button.on { background: rgba(255, 255, 255, 0.07); border-color: var(--line); }
+#place-list b { font-size: 15px; }
+#place-list span { color: var(--muted); font-size: 12px; grid-column: 1; }
+#place-list i { font-style: normal; font-size: 11px; color: var(--road); grid-row: 1; grid-column: 2; align-self: center; }
+.more { margin: 10px 2px 0; color: var(--muted); font-size: 12px; }
+
+#pins { position: fixed; inset: 0; pointer-events: none; }
+.pin { position: absolute; transform: translate(-50%, -6px); pointer-events: auto; cursor: pointer; background: none; border: 0; padding: 0; color: var(--text); font: inherit; }
+.pin .dot { display: block; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px rgba(255, 207, 74, 0.25), 0 0 14px 4px rgba(255, 207, 74, 0.55); margin: 0 auto; }
+.pin .ring { position: absolute; left: 50%; top: 6px; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; border: 2px solid var(--accent); animation: ping 2.2s ease-out infinite; }
+.pin .name { display: block; margin-top: 6px; font-size: 13px; font-weight: 700; text-shadow: 0 1px 3px #000, 0 0 8px #000; white-space: nowrap; }
+.pin.hidden { opacity: 0; pointer-events: none; }
+.pin.on .dot { background: #fff; }
+@keyframes ping { from { transform: scale(1); opacity: 0.9; } to { transform: scale(4.5); opacity: 0; } }
+
+#card {
+  position: fixed; right: 20px; bottom: 56px; width: min(340px, calc(100vw - 40px));
+  background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 18px 18px 16px; backdrop-filter: blur(10px);
+}
+#card[hidden] { display: none; }
+#card-close { position: absolute; right: 10px; top: 8px; background: none; border: 0; color: var(--muted); font-size: 16px; cursor: pointer; }
+.card-country { margin: 0; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
+#card h2 { margin: 2px 0 6px; font-size: 26px; }
+#card-blurb { margin: 0 0 10px; color: #cfd6e2; font-size: 14px; }
+.card-stats { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.card-stats li { font-size: 12px; background: rgba(255, 255, 255, 0.07); border-radius: 999px; padding: 3px 9px; }
+.card-stats li.rules { color: var(--road); }
+.card-time { margin: 0 0 12px; color: var(--muted); font-size: 13px; }
+#card-drive {
+  width: 100%; border: 0; border-radius: 12px; padding: 12px; font: inherit; font-weight: 800; font-size: 16px; cursor: pointer;
+  background: var(--accent); color: #17130a;
+}
+#card-drive:hover { filter: brightness(1.06); }
+
+#loading { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); color: var(--muted); margin: 0; }
+.credits { position: fixed; left: 0; right: 0; bottom: 8px; text-align: center; font-size: 11px; color: rgba(255, 255, 255, 0.4); pointer-events: none; padding: 0 16px; }
+
+@media (max-width: 640px) {
+  .brand p { display: none; }
+  #places { top: 64px; max-height: 32vh; }
+  #card { right: 16px; left: 16px; width: auto; bottom: 40px; }
+}
