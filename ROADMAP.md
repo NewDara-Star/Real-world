@@ -24,10 +24,17 @@ slot into the order below:
   addresses at all (no OSM `addr:*`, no Overture addresses theme), so a home
   address can't be found. Import whichever has Finglas coverage (check both;
   Eircode/GeoDirectory are closed). Never hard-code the owner's address.
-- **Front gardens:** between road and houses is open lawn. Real Finglas
-  estates show footpath, kerb, garden wall with piers, hedge, driveway, bins
-  and lamp posts; that strip is most of the view from the car. The models
-  exist (`public/models/`, item 15); placing them is the biggest realism win.
+- **Front gardens:** built (`gardens.ts`, `streetdetail.ts`). Each Finglas
+  house gets its front (the wall facing the street) and its depth to the back
+  of the footpath: about 15,000 gardens with walls (render or brick) with
+  piers, wall plus hedge, or hedge; a gate path or a driveway (about 40%);
+  party walls; bins. Walls stop the car. Lamp posts now stand at the 4,374 real
+  OSM lamp positions (the LED model), plus OSM's mapped estate walls and
+  hedges (`tools/bake/osm_features.py`). Streamed in 100 m cells near the
+  player. Still open: **look checked on the Mac** (in software rendering the
+  garden walls read much darker than the houses: check the wall material's
+  base colour); a real hedge model (`hedge_privet_1m`, §5); dropped kerbs at
+  driveways; a parked car in some driveways.
 - **Models need to look real, not just measure right.** Today's street
   furniture is correct in size and names but plain. Next pass uses reference
   photos per asset. Buildings are boxes with one repeated window and trees are

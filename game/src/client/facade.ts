@@ -19,6 +19,9 @@ import { Fn, If, abs, attribute, cameraViewMatrix, dFdx, dFdy, dot, float, floor
 //   -8          street lamp head (glows at night)
 //   -9          concrete roof tiles
 //   -10         footpath (concrete paving slabs)
+//   -11/-12/-13 modelled prop surface: brick / render / concrete, box-mapped
+//               in metres (garden walls and piers: the glTF's extras.surface)
+//   -14         hedge foliage
 // ao (w) darkens the colour (baked occlusion, e.g. under eaves).
 
 export const FACADE_PLAIN = -1;
@@ -31,6 +34,10 @@ export const FACADE_FLAT_ROOF = -7;
 export const FACADE_LAMP = -8;
 export const FACADE_TILE = -9;
 export const FACADE_PATH = -10;
+export const FACADE_PROP_BRICK = -11;
+export const FACADE_PROP_RENDER = -12;
+export const FACADE_PROP_CONCRETE = -13;
+export const FACADE_HEDGE = -14;
 
 /** One real-world texture set (CC0 photo-scanned): a tile in the shared atlases. */
 export interface TexSet {
@@ -283,6 +290,25 @@ const makeSurface = (tex: CityTextures | null) => Fn(() => {
         rough.assign(f.r);
       } else c.assign(c.mul(vnoise(xz.mul(0.8)).mul(0.1).add(0.9)));
     })
+    .ElseIf(code.lessThan(-10.5).and(code.greaterThan(-13.5)), () => {
+      // Modelled props: the same photo sets as the houses, mapped in metres on each face.
+      if (tex?.sets.brick && tex.sets.render && tex.sets.concrete) {
+        const at = propUV();
+        const { brick, render } = propMix(code);
+        const a = mix(mix(sampleSet(tex.sets.concrete, at).a, sampleSet(tex.sets.render, at, 0.55).a, render), sampleSet(tex.sets.brick, at).a, brick);
+        c.assign(c.mul(a));
+      } else c.assign(c.mul(vnoise(propUV().mul(1.5)).mul(0.14).add(0.86)));
+      // Grime splashed up the bottom of a wall.
+      c.assign(c.mul(mix(float(0.7), float(1), smoothstep(0, 0.35, positionWorld.y))));
+      rough.assign(0.9);
+    })
+    .ElseIf(code.lessThan(-13.5).and(code.greaterThan(-14.5)), () => {
+      // Clipped privet: small leaves in two sizes, darker deep in the gaps.
+      const at = propUV();
+      const leaves = vnoise(at.mul(9)).mul(0.6).add(vnoise(at.mul(23)).mul(0.4));
+      c.assign(c.mul(mix(float(0.55), float(1.25), leaves)).mul(vnoise(at.mul(1.3)).mul(0.25).add(0.85)));
+      rough.assign(0.95);
+    })
     .ElseIf(code.lessThan(-6.5), () => {
       if (tex?.sets.concrete) c.assign(c.mul(sampleSet(tex.sets.concrete, vec2(xz.x, xz.y.negate())).a));
       c.assign(c.mul(vnoise(xz.mul(0.8)).mul(0.14).add(0.86)));
@@ -299,6 +325,20 @@ const roofUV = () => {
   const sinSlope = max(float(0.25), float(1).sub(n.y.mul(n.y)).sqrt());
   return vec2(dot(positionWorld, t), positionWorld.y.div(sinSlope));
 };
+
+/** Prop faces: walls along the face and up, tops east and north, in metres. */
+const propUV = () => {
+  const n = normalWorld;
+  const t = normalize(vec3(n.z.negate(), 0, n.x).add(vec3(1e-4, 0, 0)));
+  const up = step(0.7, abs(n.y));
+  return mix(vec2(dot(positionWorld, t), positionWorld.y), vec2(positionWorld.x, positionWorld.z.negate()), up);
+};
+
+/** Which texture set a prop surface code draws (concrete when both are 0). */
+const propMix = (code: N) => ({
+  brick: step(-11.5, code),
+  render: step(-12.5, code).mul(step(code, -11.5)),
+});
 
 /** 1 where a wall pixel is window, door or shopfront (flat glass, paint, shutters): no brick relief. */
 const openings = Fn(([u, h, code]: [N, N, N]) => {
@@ -360,7 +400,17 @@ const makeNormal = (tex: CityTextures) => Fn(() => {
       const B = normalize(vec3(0, 1, 0).sub(N.mul(N.y)).add(vec3(0, 1e-4, 0)));
       nw.assign(normalize(T.mul(n.x).add(B.mul(n.y)).add(N.mul(n.z))));
     })
-    .ElseIf(code.lessThan(-6.5).and(code.greaterThan(-7.5)), () => ground(tex.sets.concrete, 1));
+    .ElseIf(code.lessThan(-6.5).and(code.greaterThan(-7.5)), () => ground(tex.sets.concrete, 1))
+    .ElseIf(code.lessThan(-10.5).and(code.greaterThan(-13.5)), () => {
+      if (!tex.sets.brick || !tex.sets.render || !tex.sets.concrete) return;
+      const at = propUV();
+      const { brick, render } = propMix(code);
+      const n = mix(mix(sampleSet(tex.sets.concrete, at).n, sampleSet(tex.sets.render, at).n, render), sampleSet(tex.sets.brick, at).n, brick);
+      const up = abs(N.y).greaterThan(0.7);
+      const T = select(up, vec3(1, 0, 0), normalize(vec3(N.z.negate(), 0, N.x).add(vec3(1e-4, 0, 0))));
+      const B = select(up, vec3(0, 0, -1), vec3(0, 1, 0));
+      nw.assign(normalize(T.mul(n.x).add(B.mul(n.y)).add(N.mul(n.z))));
+    });
   return normalize(cameraViewMatrix.mul(vec4(nw, 0)).xyz);
 });
 
@@ -393,7 +443,8 @@ const nightGlow = Fn(() => {
     const shopInside = shop.mul(step(fl, 0.5)).mul(step(fy, 0.78)).mul(step(0.06, bx)).mul(step(bx, 0.94)).mul(step(0.45, fhash(bi.add(seed.mul(37)))));
     glow.assign(warm.mul(win.mul(lit).mul(mix(float(0.45), float(0.95), power))).add(vec3(1.0, 0.8, 0.5).mul(shopInside.mul(mix(float(0.2), float(0.8), power)))));
   }).ElseIf(code.lessThan(-7.5).and(code.greaterThan(-8.5)), () => {
-    glow.assign(vec3(1.0, 0.72, 0.38).mul(5));
+    // Sodium orange in Lagos; Dublin's LED lanterns are a neutral white.
+    glow.assign(mix(vec3(1.0, 0.72, 0.38), vec3(1.0, 0.93, 0.82), styleUniform).mul(5));
   });
   return glow.mul(nightUniform);
 });

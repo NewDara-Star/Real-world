@@ -1,7 +1,10 @@
 import * as THREE from "three/webgpu";
 import { createWorldMaterial, FACADE_FLAT_ROOF, FACADE_GROUND, FACADE_KERB, FACADE_PLAIN, FACADE_ROAD, FACADE_ROAD_LINED, FACADE_TILE, FACADE_ZINC } from "./facade";
 import type { City } from "./cities";
+import { GardenPlanner } from "./gardens";
+import { loadStreetModels, type StreetModels } from "./models";
 import { placeProps, TEMPLATES, type Template } from "./props";
+import { StreetDetail, type Barrier, type StreetLamp } from "./streetdetail";
 import { RoadNet } from "./roadnet";
 import { buildRoadNet } from "./roadrender";
 import { loadCityTextures } from "./textures";
@@ -27,6 +30,16 @@ export interface WorldMeta {
   places: Place[];
   spawn: { x: number; z: number };
   attribution: string;
+}
+
+/** OSM features beyond roads (tools/bake/osm_features.py), in decimetres. */
+export interface Features {
+  lamps: number[];
+  streets: string[];
+  /** [house number, street index, x, z] */
+  addresses: [string, number, number, number][];
+  /** [kind, height, flat x z points] */
+  barriers: [number, number, number[]][];
 }
 
 export interface Road {
@@ -77,27 +90,46 @@ export class World {
   private edges = new Map<number, number[]>(); // grid cell -> flat [ax,az,bx,bz,...] wall edges
   private roadGrid = new Map<number, RoadSeg[]>();
   private footprints = new Map<number, Float32Array[]>();
+  /** Every building: height (m) and outline (x, z pairs, positive ring). */
+  buildings: { h: number; pts: Float32Array }[] = [];
   /** Every building outline (x, z pairs), for the map. */
   footprintList: Float32Array[] = [];
   /** Lane-level road rules, where the place has been baked through SUMO. */
   net: RoadNet | null = null;
   /** Real-world texture sets, or null for the procedural look. */
   tex: CityTextures | null = null;
+  /** Lamps, house numbers, walls and hedges from OSM, if the place has them baked. */
+  features: Features | null = null;
+  /** Lamp posts at their real positions (from features), facing the road. */
+  streetLamps: StreetLamp[] = [];
+  /** Front gardens and other near detail, streamed around the player (Dublin places). */
+  detail: StreetDetail | null = null;
+  gardens: GardenPlanner | null = null;
+  private models: StreetModels | null = null;
+  /** Mapped walls and hedges (metres; heights filled in). */
+  barriers: Barrier[] = [];
 
   async load(name: string, onProgress?: (p: number) => void): Promise<void> {
-    const [metaRes, bin, net, tex] = await Promise.all([
+    const [metaRes, bin, net, tex, features, models] = await Promise.all([
       fetch(`/world/${name}.json`).then((r) => r.json() as Promise<WorldMeta>),
       fetchWithProgress(`/world/${name}.bin`, onProgress),
       RoadNet.load(name),
       loadCityTextures(),
+      fetch(`/world/${name}.features.json`).then((r) => (r.ok ? (r.json() as Promise<Features>) : null)).catch(() => null),
+      this.city.style === "dublin" ? loadStreetModels() : Promise.resolve(null),
     ]);
     this.meta = metaRes;
     this.net = net;
     this.tex = tex;
-    this.build(new DataView(bin));
+    this.features = features;
+    this.models = models;
+    this.parse(bin);
+    this.build();
   }
 
-  private build(v: DataView) {
+  /** Read the baked tile and index it (no drawing: tests run this headless). */
+  parse(bin: ArrayBuffer) {
+    const v = new DataView(bin);
     const magic = String.fromCharCode(v.getUint8(0), v.getUint8(1), v.getUint8(2), v.getUint8(3));
     if (magic !== "LGW1" && magic !== "LGW2") throw new Error("bad world file");
     const hasSpeed = magic === "LGW2";
@@ -110,7 +142,7 @@ export class World {
     };
 
     // ---- parse everything first (shopfronts need the road index) ----
-    const buildings: { h: number; pts: Float32Array }[] = [];
+    const buildings = this.buildings;
     const nb = v.getUint32(o, true);
     o += 4;
     for (let i = 0; i < nb; i++) {
@@ -149,6 +181,10 @@ export class World {
     }
     for (const b of buildings) this.indexBuilding(b.pts);
     this.footprintList = buildings.map((b) => b.pts);
+  }
+
+  private build() {
+    const buildings = this.buildings;
 
     // ---- build chunk geometry ----
     const chunkBuilders = new Map<string, Builder>();
@@ -190,14 +226,36 @@ export class World {
       builderFor(c.x, c.z).flat(a.pts, a.kind === 1 ? 0.025 : 0.02, AREA_COLORS[a.kind] ?? 0x999999);
     }
 
+    // Real lamp posts where OSM maps them (Dublin: the LED post model),
+    // facing the nearest road; made-up ones only where a place has none.
+    // Mapped walls and hedges; heights where OSM has none: estate walls are
+    // about 1.8 m, hedges 1.4 m, retaining walls 1 m.
+    this.barriers = (this.features?.barriers ?? []).map(([kind, h, pts]) => ({ kind, h: h / 10 || [1.8, 1.4, 1.0][kind] || 1.5, pts: pts.map((v) => v / 10) }));
+    const realLamps = !!(this.models && this.features?.lamps.length);
+    if (realLamps) {
+      const L = this.features!.lamps;
+      for (let i = 0; i < L.length; i += 2) {
+        const x = L[i] / 10, z = L[i + 1] / 10;
+        const r = this.nearestRoadPoint(x, z);
+        const rot = r ? Math.atan2(r.x - x, r.z - z) : 0;
+        this.streetLamps.push({ x, z, rot });
+        this.lamps.push(x + Math.sin(rot) * 1.45, z + Math.cos(rot) * 1.45);
+      }
+    }
+
     // Static street furniture, deterministic so every player sees the same city.
-    for (const p of placeProps(this)) {
+    for (const p of placeProps(this, !realLamps)) {
       builderFor(p.x, p.z).stamp(TEMPLATES[p.t], p.x, p.z, p.rot, p.s, p.y ?? 0);
       // Remember where each lamp's light lands (the head hangs 1.5 m out on its arm).
       if (p.t === "lamp") this.lamps.push(p.x + Math.sin(p.rot) * 1.5, p.z + Math.cos(p.rot) * 1.5);
     }
 
     const mat = createWorldMaterial(this.tex);
+    if (this.models) {
+      this.gardens = this.net ? new GardenPlanner(this.buildings, this.net, (x, z) => this.insideBuilding(x, z)) : null;
+      this.detail = new StreetDetail(this, this.gardens, this.models, this.streetLamps, this.barriers, mat);
+      this.group.add(this.detail.group);
+    }
     for (const b of chunkBuilders.values()) {
       const mesh = new THREE.Mesh(b.geometry(), mat);
       mesh.matrixAutoUpdate = false;
@@ -218,6 +276,7 @@ export class World {
 
   /** Hide chunks beyond the fog so the GPU skips them entirely. */
   cull(x: number, z: number, radius: number) {
+    this.detail?.update(x, z);
     const r = radius + CHUNK * 0.75;
     for (const m of this.chunks) {
       const s = m.geometry.boundingSphere!;
@@ -257,6 +316,42 @@ export class World {
   insideBuilding(x: number, z: number): boolean {
     const list = this.footprints.get(cellKey(x, z));
     return !!list?.some((p) => pointInPoly(p, x, z));
+  }
+
+  /** The nearest point on a road centreline (cars' roads, not footpaths), within ~20 m. */
+  nearestRoadPoint(x: number, z: number): { x: number; z: number } | null {
+    let best = Infinity, out: { x: number; z: number } | null = null;
+    for (const s of this.roadGrid.get(cellKey(x, z)) ?? []) {
+      if (s.cls > 7) continue;
+      const dx = s.bx - s.ax, dz = s.bz - s.az;
+      const t = clamp(((x - s.ax) * dx + (z - s.az) * dz) / (dx * dx + dz * dz || 1), 0, 1);
+      const px = s.ax + dx * t, pz = s.az + dz * t;
+      const d = (px - x) ** 2 + (pz - z) ** 2;
+      if (d < best) [best, out] = [d, { x: px, z: pz }];
+    }
+    return out;
+  }
+
+  /**
+   * Garden walls, hedges and piers in front of building i, as colliders:
+   * flat [ax, az, bx, bz, height, thickness, ...].
+   */
+  gardenColliders(i: number): number[] {
+    const out: number[] = [];
+    for (const p of this.gardens?.pieces(i) ?? []) {
+      if (p.kind === "wall" || p.kind === "hedge") out.push(p.ax, p.az, p.bx, p.bz, p.h, p.t);
+      else if (p.kind === "pier") out.push(p.x - Math.cos(p.rot) * 0.26, p.z + Math.sin(p.rot) * 0.26, p.x + Math.cos(p.rot) * 0.26, p.z - Math.sin(p.rot) * 0.26, 1.06, 0.52);
+    }
+    return out;
+  }
+
+  /** Mapped walls and hedges (OSM), as colliders: flat [ax, az, bx, bz, height, thickness, ...]. */
+  barrierColliders(): number[] {
+    const out: number[] = [];
+    for (const { kind, h, pts } of this.barriers) {
+      for (let k = 0; k + 3 < pts.length; k += 2) out.push(pts[k], pts[k + 1], pts[k + 2], pts[k + 3], h, kind === 1 ? 0.8 : 0.3);
+    }
+    return out;
   }
 
   /** Distance from (x, z) to the nearest road edge (negative = on the road). */
@@ -704,7 +799,7 @@ export class Builder {
     this.idx.push(a, b, d, a, d, f, a, d, b, a, f, d);
   }
 
-  flat(pts: Float32Array, y: number, hex: number) {
+  flat(pts: Float32Array | number[], y: number, hex: number, code = FACADE_PLAIN) {
     this.n = [0, 1, 0];
     const n = pts.length / 2;
     const contour: THREE.Vector2[] = [];
@@ -712,7 +807,7 @@ export class Builder {
     const tris = THREE.ShapeUtils.triangulateShape(contour, []);
     const c = this.c.setHex(hex);
     const base = this.pos.length / 3;
-    for (let i = 0; i < n; i++) this.vert(pts[i * 2], y, pts[i * 2 + 1], c, 1);
+    for (let i = 0; i < n; i++) this.vert(pts[i * 2], y, pts[i * 2 + 1], c, 1, 0, 0, code);
     for (const t of tris) this.idx.push(base + t[0], base + t[1], base + t[2], base + t[0], base + t[2], base + t[1]);
   }
 
@@ -739,20 +834,25 @@ export class Builder {
     }
   }
 
-  /** Stamp a prop template (non-indexed triangles with baked colours). */
-  stamp(t: Template, x: number, z: number, rot: number, s: number, y = 0) {
+  /**
+   * Stamp a prop template, turned by `rot` about y. `scale` stretches it in
+   * its own axes first (a 1 m wall module stretched along a run).
+   */
+  stamp(t: Template, x: number, z: number, rot: number, s: number, y = 0, scale: [number, number, number] = [1, 1, 1]) {
     const cos = Math.cos(rot), sin = Math.sin(rot);
     const base = this.pos.length / 3;
     const n = t.pos.length / 3;
+    const [kx, ky, kz] = [scale[0] * s, scale[1] * s, scale[2] * s];
     for (let i = 0; i < n; i++) {
-      const px = t.pos[i * 3] * s, py = t.pos[i * 3 + 1] * s, pz = t.pos[i * 3 + 2] * s;
+      const px = t.pos[i * 3] * kx, py = t.pos[i * 3 + 1] * ky, pz = t.pos[i * 3 + 2] * kz;
       this.pos.push(x + px * cos + pz * sin, py + y, z - px * sin + pz * cos);
       this.col.push(t.col[i * 3], t.col[i * 3 + 1], t.col[i * 3 + 2]);
       const nx = t.nrm[i * 3], ny = t.nrm[i * 3 + 1], nz = t.nrm[i * 3 + 2];
       this.nrm.push(nx * cos + nz * sin, ny, -nx * sin + nz * cos);
       this.fac.push(0, 0, t.code ? t.code[i] : FACADE_PLAIN, 1);
-      this.idx.push(base + i);
+      if (!t.idx) this.idx.push(base + i);
     }
+    if (t.idx) for (let i = 0; i < t.idx.length; i++) this.idx.push(base + t.idx[i]);
   }
 
   geometry(): THREE.BufferGeometry {

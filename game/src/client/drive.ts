@@ -129,8 +129,9 @@ export class PlayerVehicle {
     this.yaw = yaw;
     const ps = base.physics;
     this.origin = originOf(ps);
-    this.phys = new CarPhysics(ps, x - Math.sin(yaw) * this.origin.z, z - Math.cos(yaw) * this.origin.z, yaw, world.footprintList);
+    this.phys = new CarPhysics(ps, x - Math.sin(yaw) * this.origin.z, z - Math.cos(yaw) * this.origin.z, yaw, world.footprintList, (i) => world.gardenColliders(i));
     if (world.meta) this.phys.addBounds(world.meta.half.x, world.meta.half.z);
+    this.phys.addSegments(world.barrierColliders());
     const mat = createVertexColorMaterial(0.55, 0.15);
     this.body = new THREE.Group();
     if (this.model) this.body.add(this.model.root);

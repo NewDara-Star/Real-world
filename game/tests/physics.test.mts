@@ -105,6 +105,18 @@ console.log("Polo (test car):");
   within("the crash is reported at about the speed it hit", impact, 6, 11, " m/s");
 }
 {
+  // A front garden wall (0.9 m, from gardens.ts via World.gardenColliders) belongs to
+  // a house far behind it; it streams in with that house and stops the car.
+  const house = new Float32Array([-5, 40, 5, 40, 5, 48, -5, 48]);
+  const c = new CarPhysics(HATCH_AUTO, 0, 0, 0, [house], (i) => (i === 0 ? [-6, 25, 6, 25, 0.9, 0.3] : []));
+  run(c, { selector: "P" }, 1);
+  c.streamWalls();
+  run(c, { throttle: 0.5 }, 10, () => kmh(c) >= 20);
+  run(c, {}, 4);
+  check("a low garden wall stops the car", c.position.z < 25 && c.position.z > 21, `stopped at z ${c.position.z.toFixed(2)}, wall at 25`);
+  check("and the car stays on its wheels", c.upY > 0.9, `up ${c.upY.toFixed(2)}`);
+}
+{
   // Tragedy path: a long drive (10 minutes of game time) mustn't blow up or drift.
   const c = car();
   run(c, { throttle: 0.4, steer: 0.15 }, 600);

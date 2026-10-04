@@ -11,7 +11,8 @@ Steps: Overture extracts for the bbox -> bake_world (buildings, roads, areas)
 -> real OSM roads (osm_fetch: lanes, turn lanes, roundabouts, limits), or if
 no OSM source answers, an OSM rebuild from Overture (no lanes or roundabouts)
 -> SUMO netconvert + mini-roundabout pass + bake_net (lanes, junction rules,
-signals) -> game/public/world/places.json, which the world map reads.
+signals) -> osm_features (real lamps, house numbers, walls and hedges)
+-> game/public/world/places.json, which the world map reads.
 
 Place definitions live in tools/bake/places.json so every place can be rebuilt.
 """
@@ -72,6 +73,12 @@ def bake(name, p, net_only=False, refetch=False):
             os.path.join(d, "ov_infrastructure.parquet"), os.path.join(d, "ov_connector.parquet"), osm)
     run("sh", os.path.join(BAKE, "build_net.sh"), osm, netxml, p.get("drive", "right"))
     run("python3", os.path.join(BAKE, "bake_net.py"), netxml, osm, os.path.join(WORLD, f"{name}.json"), os.path.join(WORLD, f"{name}.net.bin"))
+    # Lamps, house numbers, walls and hedges. Optional: the game runs without them.
+    code = subprocess.run(["python3", os.path.join(BAKE, "osm_features.py"), name], cwd=ROOT).returncode
+    if code == 3:
+        print("! no OSM source answered: no real lamps, house numbers or walls this time", file=sys.stderr)
+    elif code:
+        sys.exit(f"osm_features.py failed (exit {code})")
 
 
 def register():

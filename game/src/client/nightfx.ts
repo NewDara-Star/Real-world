@@ -1,6 +1,6 @@
 import * as THREE from "three/webgpu";
-import { float, length, smoothstep, uv, vec3 } from "three/tsl";
-import { nightUniform } from "./facade";
+import { float, length, mix, smoothstep, uv, vec3 } from "three/tsl";
+import { nightUniform, styleUniform } from "./facade";
 
 // Fake streetlight pools: one instanced, additively blended disc per lamp.
 // Hundreds of real point lights would cost too much; a soft glow decal on the
@@ -13,7 +13,7 @@ export function createLightPools(lamps: number[]): THREE.InstancedMesh {
   // Radial falloff from the disc centre (uv 0.5, 0.5), sodium orange.
   const d = length(uv().sub(0.5)).mul(2);
   const falloff = smoothstep(float(1), float(0), d).pow(2.2);
-  mat.colorNode = vec3(1.0, 0.6, 0.26).mul(falloff).mul(nightUniform).mul(1.3);
+  mat.colorNode = mix(vec3(1.0, 0.6, 0.26), vec3(0.95, 0.88, 0.78), styleUniform).mul(falloff).mul(nightUniform).mul(1.3);
   mat.fog = false;
   const mesh = new THREE.InstancedMesh(geo, mat, Math.max(1, count));
   const m = new THREE.Matrix4();

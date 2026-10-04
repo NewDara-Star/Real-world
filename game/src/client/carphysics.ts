@@ -209,7 +209,11 @@ export class CarPhysics {
   private bBoxes: Float32Array;
   private lastStream = { x: 1e9, z: 1e9 };
 
-  constructor(readonly spec: CarSpec, x: number, z: number, yaw: number, private buildings: Float32Array[]) {
+  /**
+   * `extra(i)`: more walls that belong to building i (its front garden), as
+   * flat [ax, az, bx, bz, height, thickness, ...]; streamed in and out with it.
+   */
+  constructor(readonly spec: CarSpec, x: number, z: number, yaw: number, private buildings: Float32Array[], private extra: (i: number) => number[] = () => []) {
     this.world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
     const s = spec;
     const desc = RAPIER.RigidBodyDesc.dynamic()
@@ -281,6 +285,23 @@ export class CarPhysics {
   addBounds(hx: number, hz: number) {
     for (const [x, z, ex, ez] of [[hx, 0, 1, hz], [-hx, 0, 1, hz], [0, hz, hx, 1], [0, -hz, hx, 1]]) {
       this.world.createCollider(RAPIER.ColliderDesc.cuboid(ex, 4, ez).setTranslation(x, 4, z));
+    }
+  }
+
+  /** Low walls and hedges as fixed colliders: flat [ax, az, bx, bz, height, thickness, ...]. */
+  addSegments(segs: number[], into?: RAPIER.Collider[]) {
+    for (let k = 0; k + 5 < segs.length; k += 6) {
+      const [ax, az, bx, bz, h, t] = segs.slice(k, k + 6);
+      const len = Math.hypot(bx - ax, bz - az);
+      if (len < 0.05) continue;
+      const ang = Math.atan2(bx - ax, bz - az);
+      const d = RAPIER.ColliderDesc.cuboid(t / 2, h / 2, len / 2)
+        .setTranslation((ax + bx) / 2, h / 2, (az + bz) / 2)
+        .setRotation({ x: 0, y: Math.sin(ang / 2), z: 0, w: Math.cos(ang / 2) })
+        .setFriction(0.5)
+        .setRestitution(0.05);
+      const c = this.world.createCollider(d);
+      into?.push(c);
     }
   }
 
@@ -396,6 +417,7 @@ export class CarPhysics {
           .setRestitution(0.05);
         cols.push(this.world.createCollider(d));
       }
+      this.addSegments(this.extra(i), cols);
       this.walls.set(i, cols);
     }
   }

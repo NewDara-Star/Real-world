@@ -12,6 +12,8 @@ export interface Template {
   nrm: Float32Array;
   /** Optional per-vertex facade code (e.g. glowing lamp heads); plain if absent. */
   code?: Float32Array;
+  /** Triangle indices (models from glTF); absent = every three vertices are a triangle. */
+  idx?: Uint32Array;
 }
 
 type Part = [THREE.BufferGeometry, number] | [THREE.BufferGeometry, number, number];
@@ -237,8 +239,11 @@ export interface PropPlacement {
   y?: number;
 }
 
-/** Deterministic street furniture placement for a world tile. */
-export function placeProps(world: World): PropPlacement[] {
+/**
+ * Deterministic street furniture placement for a world tile. `lamps` false
+ * when the place has its real lamp posts (World.streetLamps).
+ */
+export function placeProps(world: World, lamps = true): PropPlacement[] {
   const out: PropPlacement[] = [];
   const lagos = world.city.lagosLife;
   const rand = mulberry32(1337);
@@ -278,7 +283,7 @@ export function placeProps(world: World): PropPlacement[] {
         sinceKiosk += 3;
         sinceLamp += 3;
         // Streetlights on the main roads, alternating sides, arm over the road.
-        if ((r.cls <= 5 || (!lagos && r.cls <= 6)) && sinceLamp > (lagos ? 32 : 38)) {
+        if (lamps && (r.cls <= 5 || (!lagos && r.cls <= 6)) && sinceLamp > (lagos ? 32 : 38)) {
           const off = r.w / 2 + 0.6;
           const tx = px + nx * off * lampSide, tz = pz + nz * off * lampSide;
           if (free(tx, tz, 0.3)) {
