@@ -273,9 +273,11 @@ Clavet 2016) or UE5's distance matching and stride warping:
   desired speed of 1.34 m/s with an SD of about 0.26 [m]. The current spawn,
   `1.1 + rand * 0.45` (`trafficnet.ts`), is close; draw from a normal
   distribution later.
-- **Current bug in passing:** `trafficnet.ts` advances the step phase with a
-  fixed `0.016` per frame (`p.phase += 0.016 * p.v * 6`), so walking runs
-  slower at low fps. The new code must use `dt`.
+- **Stride phase and frame rate (fixed in 461eb0a):** the step phase used to
+  advance by a fixed `0.016` per frame, so legs ran slow at low fps. It now
+  advances by `dt`; `tests/pedestrians.test.mts` checks the phase per metre
+  walked at 30, 60 and 120 fps. Animation clips must keep the same rule:
+  playback rate from distance walked, not frames.
 - **Knocked down:** the current box tips over. Rocketbox has no fall or ragdoll
   clips. Use `crouch_*` or a still frame of a lying pose, or just keep the
   rotate-and-lie trick for now.
