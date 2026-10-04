@@ -70,6 +70,22 @@ physics and the driver. `research/15-what-it-takes.md` is the full map.
 16. Night: a top-down light map for street lamps and every car's headlights
     (overlaps take the brighter, not the sum; research 16), wet-road streaks.
 
+## New places from cities' own 3D models (research 19)
+
+- `tools/bake/import_citymodel.py`: read a city's open 3D model (CityGML or
+  CityJSON via cjio and citygml-tools; PLATEAU via its MIT converter; lidar
+  via laspy/PDAL), reproject, join to Overture, and write real heights and
+  roof types into the world file (1–2 days), then real roof meshes (2–4 days).
+  Wall and roof colours from photo textures, not the textures themselves.
+- Easiest rich places first: Tokyo (PLATEAU, left-hand traffic), the
+  Netherlands (3D BAG + AHN lidar; the simplest test of the importer),
+  Helsinki/Espoo, Berlin, Hamburg or NRW, Zürich, Vienna, New York,
+  Hong Kong, Luxembourg. About 50 of the ~90 sources surveyed fit our
+  licence rule; check each licence on the owner's Mac before importing
+  (government portals are blocked from the cloud sandbox).
+- Finglas gets the lidar path (GSI heights); Yaba stays on Overture plus
+  Google Open Buildings 2.5D heights (CC BY).
+
 ## From the city teardowns (research 16–18), slotted in when their item comes up
 
 - World data and bake: footpath widths measured from the building line; an
