@@ -115,12 +115,25 @@ html, body {
 #drivebar .btn { margin-left: 0; }
 #speedo {
   position: fixed; right: 14px; bottom: calc(68px + env(safe-area-inset-bottom));
-  background: rgba(29, 26, 22, 0.75); color: #fff; border-radius: 14px; padding: 6px 12px;
-  display: flex; align-items: baseline; gap: 6px; font-variant-numeric: tabular-nums; pointer-events: none;
+  background: rgba(29, 26, 22, 0.75); color: #fff; border-radius: 14px; padding: 6px 12px 8px;
+  display: flex; flex-direction: column; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; pointer-events: none;
 }
-#speedo b { font-size: 30px; }
+#speedo[hidden] { display: none; }
+#speedo .sp-row { display: flex; align-items: baseline; gap: 6px; }
+#speedo b { font-size: 30px; min-width: 2ch; text-align: right; }
 #speedo span { font-size: 12px; opacity: 0.8; }
-#speedo i { font-style: normal; font-size: 14px; background: #ffd23f; color: #1d1a16; border-radius: 6px; padding: 1px 6px; margin-left: 4px; }
+#speedo .ind { font-style: normal; font-size: 18px; color: #2f4a2f; transition: color 40ms; }
+#speedo .ind.on { color: #3dff6a; text-shadow: 0 0 8px #3dff6a; }
+#prnd { display: flex; gap: 8px; font-weight: 700; }
+#prnd b { font-size: 15px; min-width: 0; opacity: 0.35; }
+#prnd b.on { opacity: 1; color: #ffd23f; }
+#speedo .tt { display: flex; gap: 8px; font-size: 12px; min-height: 14px; }
+#speedo .tt i { font-style: normal; opacity: 0; }
+#speedo .tt i.on { opacity: 1; }
+#tt-park.on { color: #ff5a4a; }
+#tt-lights.on { color: #3dff6a; }
+#tt-lights.full { color: #4aa3ff; }
+#tt-wipers.on { color: #cfe3ff; }
 #calib { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0, 0, 0, 0.55); }
 .calib-box { background: var(--paper); border-radius: 18px; padding: 22px 26px; width: min(420px, 90vw); text-align: center; }
 .calib-box h2 { margin: 0 0 8px; }

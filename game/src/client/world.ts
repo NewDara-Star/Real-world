@@ -103,7 +103,9 @@ export class World {
       const h = v.getUint16(o, true) / 10;
       const n = v.getUint16(o + 2, true);
       o += 4;
-      buildings.push({ h, pts: readPts(n) });
+      // The walls, eaves and parapets all assume a positive (shoelace) ring;
+      // the bake writes the opposite, which turned every wall inside out.
+      buildings.push({ h, pts: positiveRing(readPts(n)) });
     }
     const nr = v.getUint32(o, true);
     o += 4;
@@ -796,6 +798,20 @@ export const hash = (n: number) => {
 };
 
 /** Signed area of a ring (shoelace). */
+/** The ring with positive signed area, reversing it in place if needed. */
+function positiveRing(p: Float32Array): Float32Array {
+  if (ringArea(p) >= 0) return p;
+  const n = p.length / 2;
+  for (let i = 0, j = n - 1; i < j; i++, j--) {
+    const x = p[i * 2], z = p[i * 2 + 1];
+    p[i * 2] = p[j * 2];
+    p[i * 2 + 1] = p[j * 2 + 1];
+    p[j * 2] = x;
+    p[j * 2 + 1] = z;
+  }
+  return p;
+}
+
 function ringArea(p: Float32Array): number {
   let a = 0;
   const n = p.length / 2;

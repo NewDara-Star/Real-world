@@ -17,8 +17,44 @@ export interface DriveInput {
   /** edge-triggered: true for one read after the button goes down */
   camera: boolean;
   exit: boolean;
+  /** Gear selector, edge-triggered: -1 one step toward P, +1 one step toward D. */
+  shift: -1 | 0 | 1;
+  indicatorLeft: boolean;
+  indicatorRight: boolean;
+  hazards: boolean;
+  lights: boolean;
+  wipers: boolean;
+  /** Toggle the (electronic) parking brake. */
+  parkBrake: boolean;
+  /** Held head check: -1 look left, +1 look right, 0 straight ahead. */
+  look: number;
+  /** Held: look back over the shoulder (reversing). */
+  lookBack: boolean;
   device: "keyboard" | "gamepad" | "wheel";
 }
+
+/**
+ * Logitech PlayStation-wheel buttons in HID order, which is also the Gamepad
+ * API button index on macOS/Windows: 0 Cross, 1 Square, 2 Circle, 3 Triangle,
+ * 4 right paddle, 5 left paddle, 6 R2, 7 L2, 8 Share, 9 Options, 10 R3, 11 L3.
+ */
+const LOGI = { cross: 0, square: 1, circle: 2, triangle: 3, paddleRight: 4, paddleLeft: 5, r2: 6, l2: 7, share: 8, options: 9, r3: 10, l3: 11 };
+
+/** Which car function each wheel control does. One place to remap. */
+export const WHEEL_MAP = {
+  shiftToD: "paddleRight",
+  shiftToP: "paddleLeft",
+  indicatorLeft: "l2",
+  indicatorRight: "r2",
+  lights: "l3",
+  wipers: "r3",
+  hazards: "share",
+  parkBrake: "cross",
+  horn: "square",
+  camera: "triangle",
+  exit: "circle",
+} as const;
+type WheelButton = keyof typeof LOGI;
 
 interface AxisCal {
   axis: number;
@@ -53,7 +89,7 @@ function defaultCalibration(p: Gamepad): WheelCalibration | null {
   const pedals: number[] = [];
   // Pedals rest at one end of their range; steering (axis 0) rests mid-way.
   p.axes.forEach((v, i) => {
-    if (i > 0 && Math.abs(v) > 0.8) pedals.push(i);
+    if (i > 0 && Math.abs(v) > 0.8 && Math.abs(v) < 1.05) pedals.push(i); // > 1.05 is the d-pad hat
   });
   if (pedals.length < 2) return null;
   const [gas, brake] = pedals;
@@ -63,9 +99,9 @@ function defaultCalibration(p: Gamepad): WheelCalibration | null {
     gas: { axis: gas, rest: Math.sign(p.axes[gas]), full: -Math.sign(p.axes[gas]) },
     brake: { axis: brake, rest: Math.sign(p.axes[brake]), full: -Math.sign(p.axes[brake]) },
     rotation: 900,
-    horn: 2, // Square
-    camera: 3, // Triangle
-    handbrake: 0, // Cross
+    horn: LOGI.square,
+    camera: LOGI.triangle,
+    handbrake: -1, // Cross is the parking brake; the clutch pedal is the handbrake
   };
 }
 
@@ -74,6 +110,9 @@ export class DriveControls {
   private cal: WheelCalibration | null = null;
   private kbSteer = 0;
   private prevButtons = new Set<string>();
+  /** Gamepad-API axis carrying the wheel's d-pad (a HID hat), once seen. */
+  private hatAxis = -1;
+  private clutch = { axis: -1, rest: 1 };
   /** Taps latched on keydown so a press shorter than one frame still counts. */
   private tapped = new Set<string>();
   enabled = true;
@@ -151,9 +190,32 @@ export class DriveControls {
     return defaultCalibration(w);
   }
 
+  /** D-pad (0 centred, 1..8 clockwise from up): hold left/right for a head check, down to look back. */
+  private dpad(d: number, out: DriveInput) {
+    if (d === 0) return;
+    if (d >= 6 && d <= 8) out.look = -1;
+    else if (d >= 2 && d <= 4) out.look = 1;
+    if (d >= 4 && d <= 6) out.lookBack = true;
+  }
+
+  /**
+   * Gamepad-API wheels report the d-pad hat as one axis: -1 = up, stepping
+   * by 2/7 clockwise to 1 = up-left, and about 1.29 when centred.
+   */
+  private readHat(p: Gamepad): number {
+    if (this.hatAxis < 0) this.hatAxis = p.axes.findIndex((v) => v > 1.1);
+    const v = p.axes[this.hatAxis];
+    if (v === undefined || v > 1.1 || v < -1.05) return 0;
+    return Math.round((v + 1) * 3.5) + 1;
+  }
+
   read(dt: number): DriveInput {
     const k = this.keys;
-    const out: DriveInput = { steer: 0, throttle: 0, brake: 0, handbrake: false, horn: false, camera: false, exit: false, device: "keyboard" };
+    const out: DriveInput = {
+      steer: 0, throttle: 0, brake: 0, handbrake: false, horn: false, camera: false, exit: false,
+      shift: 0, indicatorLeft: false, indicatorRight: false, hazards: false, lights: false, wipers: false, parkBrake: false,
+      look: 0, lookBack: false, device: "keyboard",
+    };
     const pressed = new Set<string>();
 
     // Keyboard: steering eases in and out so taps aren't twitchy.
@@ -167,8 +229,11 @@ export class DriveControls {
       out.handbrake = k.has(" ");
       out.horn = k.has("h");
       out.horn ||= this.tapped.has("h");
+      out.look = (k.has("]") ? 1 : 0) - (k.has("[") ? 1 : 0);
+      out.lookBack = k.has("\\");
     }
 
+    let clutch = 0;
     const g = this.g29?.connected ? this.g29.state : null;
     const wheel = g ? null : this.wheelPad();
     const wcal = wheel ? this.activeCalibration(wheel) : null;
@@ -177,10 +242,10 @@ export class DriveControls {
       out.steer = g.steer;
       out.throttle = g.gas < 0.02 ? 0 : g.gas;
       out.brake = g.brake < 0.02 ? 0 : g.brake;
-      out.handbrake ||= g.buttons.cross;
-      out.horn ||= g.buttons.square;
-      if (g.buttons.triangle) pressed.add("g-cam");
-      if (g.buttons.circle) pressed.add("g-exit");
+      // Automatics have no clutch: the third pedal is a spring-loaded handbrake.
+      out.handbrake ||= g.clutch > 0.35;
+      for (const [fn, b] of Object.entries(WHEEL_MAP)) if (g.buttons[b as WheelButton]) pressed.add(`w-${fn}`);
+      this.dpad(g.dpad, out);
       out.device = "wheel";
     } else if (wheel && wcal) {
       const c = wcal;
@@ -190,9 +255,24 @@ export class DriveControls {
       out.steer = clamp((sx - mid) / half, -1, 1);
       out.throttle = pedal(wheel.axes[c.gas.axis], c.gas);
       out.brake = pedal(wheel.axes[c.brake.axis], c.brake);
-      out.handbrake ||= !!wheel.buttons[c.handbrake]?.pressed;
-      out.horn ||= !!wheel.buttons[c.horn]?.pressed;
-      if (wheel.buttons[c.camera]?.pressed) pressed.add("w-cam");
+      if (c.handbrake >= 0) out.handbrake ||= !!wheel.buttons[c.handbrake]?.pressed;
+      if (KNOWN_LOGITECH.test(wheel.id)) {
+        // Known layout: every button, the d-pad hat, and the clutch pedal.
+        for (const [fn, b] of Object.entries(WHEEL_MAP)) if (wheel.buttons[LOGI[b as WheelButton]]?.pressed) pressed.add(`w-${fn}`);
+        this.dpad(this.readHat(wheel), out);
+        // The clutch is the remaining axis resting at a hard end; learn it once.
+        if (this.clutch.axis < 0) {
+          const i = wheel.axes.findIndex((v, j) => j > 0 && j !== c.gas.axis && j !== c.brake.axis && j !== this.hatAxis && Math.abs(v) > 0.8 && Math.abs(v) < 1.05);
+          if (i >= 0) this.clutch = { axis: i, rest: Math.sign(wheel.axes[i]) };
+        }
+        if (this.clutch.axis >= 0) {
+          clutch = Math.abs((wheel.axes[this.clutch.axis] ?? this.clutch.rest) - this.clutch.rest) / 2;
+          out.handbrake ||= clutch > 0.35;
+        }
+      } else {
+        if (wheel.buttons[c.horn]?.pressed) pressed.add("w-horn");
+        if (wheel.buttons[c.camera]?.pressed) pressed.add("w-camera");
+      }
       out.device = "wheel";
     } else {
       for (const p of navigator.getGamepads?.() ?? []) {
@@ -207,8 +287,20 @@ export class DriveControls {
         }
         out.handbrake ||= !!p.buttons[0]?.pressed; // Cross / A
         out.horn ||= !!p.buttons[10]?.pressed || !!p.buttons[2]?.pressed; // L3 or Square / X
-        if (p.buttons[3]?.pressed) pressed.add("gp-cam"); // Triangle / Y
-        if (p.buttons[1]?.pressed) pressed.add("gp-exit"); // Circle / B
+        const pb = (i: number, id: string) => p.buttons[i]?.pressed && pressed.add(id);
+        pb(3, "w-camera"); // Triangle / Y
+        pb(1, "w-exit"); // Circle / B
+        pb(5, "w-shiftToD"); // R1
+        pb(4, "w-shiftToP"); // L1
+        pb(14, "w-indicatorLeft"); // d-pad
+        pb(15, "w-indicatorRight");
+        pb(12, "w-lights");
+        pb(13, "w-wipers");
+        pb(11, "w-hazards"); // R3
+        pb(8, "w-parkBrake"); // Share / View
+        // Right stick: look around.
+        const rx = p.axes[2] ?? 0;
+        if (Math.abs(rx) > 0.25) out.look = rx;
         out.device = "gamepad";
         break;
       }
@@ -221,14 +313,22 @@ export class DriveControls {
       steer: out.steer,
       gas: out.throttle,
       brake: out.brake,
-      clutch: g ? g.clutch : 0,
+      clutch: g ? g.clutch : clutch,
       axes: anyPad ? anyPad.axes.map((a) => Math.round(a * 100) / 100) : [],
       id: g ? this.g29?.device?.productName ?? "G29" : anyPad?.id ?? "",
     };
-    const edge = (id: string) => pressed.has(id) && !this.prevButtons.has(id);
+    const edge = (fn: string) => pressed.has(`w-${fn}`) && !this.prevButtons.has(`w-${fn}`);
     const tap = (key: string) => this.enabled && this.tapped.has(key);
-    out.camera = tap("c") || edge("w-cam") || edge("gp-cam") || edge("g-cam");
-    out.exit = tap("f") || tap("enter") || edge("gp-exit") || edge("g-exit");
+    out.horn ||= pressed.has("w-horn");
+    out.camera = tap("c") || edge("camera");
+    out.exit = tap("f") || tap("enter") || edge("exit");
+    out.shift = tap("x") || edge("shiftToD") ? 1 : tap("z") || edge("shiftToP") ? -1 : 0;
+    out.indicatorLeft = tap("q") || edge("indicatorLeft");
+    out.indicatorRight = tap("e") || edge("indicatorRight");
+    out.hazards = tap("k") || edge("hazards");
+    out.lights = tap("l") || edge("lights");
+    out.wipers = tap("v") || edge("wipers");
+    out.parkBrake = tap("b") || edge("parkBrake");
     this.tapped.clear();
     this.prevButtons = pressed;
     return out;

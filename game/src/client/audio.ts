@@ -130,6 +130,42 @@ export class StreetAudio {
     src.start(t, Math.random() * 2, 0.7);
   }
 
+  /** Indicator relay: "tick" when the lamp lights, softer "tock" when it goes out. */
+  tick(on: boolean) {
+    const ctx = this.ctx;
+    if (!ctx || this.muted) return;
+    const t = ctx.currentTime;
+    const o = ctx.createOscillator();
+    o.type = "square";
+    o.frequency.value = on ? 1900 : 1300;
+    const hp = ctx.createBiquadFilter();
+    hp.type = "highpass";
+    hp.frequency.value = 900;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(on ? 0.09 : 0.06, t);
+    g.gain.exponentialRampToValueAtTime(0.0005, t + 0.025);
+    o.connect(hp).connect(g).connect(this.master);
+    o.start(t);
+    o.stop(t + 0.03);
+  }
+
+  /** Wiper blade reaching the end of its sweep: a soft rubbery thunk. */
+  wipe() {
+    const ctx = this.ctx;
+    if (!ctx || this.muted) return;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise;
+    const lp = ctx.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = 500;
+    const g = ctx.createGain();
+    const t = ctx.currentTime;
+    g.gain.setValueAtTime(0.12, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+    src.connect(lp).connect(g).connect(this.master);
+    src.start(t, Math.random() * 2, 0.15);
+  }
+
   setMuted(m: boolean) {
     this.muted = m;
     if (this.ctx) this.master.gain.setTargetAtTime(m ? 0 : 0.8, this.ctx.currentTime, 0.1);

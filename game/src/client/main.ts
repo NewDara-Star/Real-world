@@ -116,6 +116,9 @@ let cockpit = false;
 let hornCooldown = 0;
 let crashCooldown = 0;
 let lookOffset = 0;
+/** Head check: where the driver's head is turned (radians, + left) and wants to be. */
+let headYaw = 0;
+let headTarget = 0;
 if (DEBUG) Object.assign(window, { __me: me, __remotes: remotes, __world: world });
 let online = 1;
 let meetId = Number(params.get("meet")) || 0;
@@ -632,7 +635,7 @@ function enterVehicle(kind: VehicleKind) {
     return;
   }
   car = new PlayerVehicle(kind, spot.x, spot.z, spot.yaw, CITY.drive);
-  if (DEBUG) Object.assign(window, { __car: car });
+  if (DEBUG) Object.assign(window, { __car: car, __drive: drive });
   scene.add(car.root);
   me.avatar.root.visible = false;
   me.camYaw = spot.yaw + Math.PI;
@@ -641,10 +644,16 @@ function enterVehicle(kind: VehicleKind) {
   $("drive-car").hidden = $("drive-danfo").hidden = true;
   $("drive-exit").hidden = false;
   $("speedo").hidden = false;
+  headYaw = headTarget = 0;
   if (drive.needsCalibration()) toast("Wheel detected 🎮 tap Wheel setup to calibrate it");
-  else if (drive.wheelPad()) toast("Wheel ready. C = camera, H = horn, F = get out");
+  else if (g29.connected || drive.wheelPad()) toast("In P with the parking brake on. Brake, right paddle to D, then gas. Left paddle goes back toward R and P");
   else if (isTouch) toast("Left thumb: up = gas, down = brake, sideways = steer");
-  else toast("W/S gas & brake · A/D steer · Space handbrake · H horn · C camera · F get out");
+  else toast("Brake (S) then X for Drive, Z back toward R and P · Q/E indicators · L lights · V wipers · B parking brake · C camera · F get out");
+  // Touch has no gear buttons: start ready to go.
+  if (isTouch) {
+    car.selector = "D";
+    car.parkBrake = false;
+  }
 }
 
 function exitVehicle() {
@@ -660,6 +669,7 @@ function exitVehicle() {
   car = null;
   me.avatar.root.visible = true;
   audio.drive(false, "car", 0, 0, 0, 0);
+  updateHeadlights(null);
   void g29.release();
   $("drive-car").hidden = $("drive-danfo").hidden = false;
   $("drive-exit").hidden = true;
@@ -676,7 +686,15 @@ function driveFrame(dt: number, now: number) {
     inp.throttle = Math.max(0, input.move.y);
     inp.brake = Math.max(0, -input.move.y);
   }
+  if (inp.shift) {
+    const why = c.shift(inp.shift, inp.brake);
+    if (why) toast(why);
+  }
+  c.controls(inp, dt);
   c.update(dt, inp, world);
+  if (c.ticked !== null) audio.tick(c.ticked);
+  if (c.wiped) audio.wipe();
+  headTarget = inp.lookBack ? -c.seat * 2.45 : -inp.look * 1.35;
 
   if (traffic) {
     const fx = Math.sin(c.yaw), fz = Math.cos(c.yaw);
@@ -723,22 +741,68 @@ function driveFrame(dt: number, now: number) {
   const flags = (c.speed > 0.3 ? FLAG_MOVING : 0) | FLAG_DRIVING | (c.kind === "danfo" ? FLAG_DANFO : 0);
   net.sendMove(c.x, c.z, c.yaw, flags, now);
   $("kmh").textContent = String(Math.round(Math.abs(c.vf) * 3.6));
-  $("gear").textContent = c.vf < -0.5 ? "R" : String(c.gear);
+  updateDash(c);
+  updateHeadlights(c);
+}
+
+/** Selector strip, indicator arrows and tell-tales on the speedo. */
+function updateDash(c: PlayerVehicle) {
+  for (const el of document.querySelectorAll<HTMLElement>("#prnd b")) el.classList.toggle("on", el.dataset.g === c.selector);
+  const left = c.blinkOn && (c.indicator === -1 || c.hazards);
+  const right = c.blinkOn && (c.indicator === 1 || c.hazards);
+  $("ind-l").classList.toggle("on", left);
+  $("ind-r").classList.toggle("on", right);
+  $("tt-park").classList.toggle("on", c.parkBrake);
+  $("tt-lights").classList.toggle("on", c.lights > 0);
+  $("tt-lights").classList.toggle("full", c.lights === 2);
+  $("tt-wipers").classList.toggle("on", c.wipers > 0);
+  $("tt-wipers").textContent = c.wipers ? ["", "INT", "LO", "HI"][c.wipers] : "";
+}
+
+// One spotlight for the player's headlights, created up front with zero
+// intensity so turning them on never triggers a shader rebuild.
+const headlight = new THREE.SpotLight(0xfff4e0, 0, 70, 0.5, 0.45, 1.2);
+headlight.castShadow = false;
+scene.add(headlight, headlight.target);
+function updateHeadlights(c: PlayerVehicle | null) {
+  if (!c || !c.lights) {
+    headlight.intensity = 0;
+    return;
+  }
+  const full = c.lights === 2;
+  const fx = Math.sin(c.yaw), fz = Math.cos(c.yaw);
+  const nose = c.spec.length / 2;
+  headlight.position.set(c.x + fx * nose, c.kind === "danfo" ? 0.85 : 0.7, c.z + fz * nose);
+  const reach = full ? 60 : 22;
+  headlight.target.position.set(c.x + fx * (nose + reach), 0, c.z + fz * (nose + reach));
+  headlight.target.updateMatrixWorld();
+  headlight.angle = full ? 0.45 : 0.55;
+  headlight.distance = full ? 140 : 60;
+  headlight.intensity = full ? 70 : 35;
 }
 
 function placeDriveCamera(dt: number, c: PlayerVehicle) {
+  // Head check: quick turn while held, snaps back to the road on release.
+  headYaw += (headTarget - headYaw) * Math.min(1, dt * 10);
   const fx = Math.sin(c.yaw), fz = Math.cos(c.yaw);
   if (cockpit) {
     // Driver's eye: left seat, looking down the road (plus any look-around).
     const p = c.spec.cockpit;
     const rx = -fz, rz = fx;
-    camera.position.set(c.x + fx * p.z - rx * p.x, p.y, c.z + fz * p.z - rz * p.x);
-    const ly = c.yaw + lookOffset;
-    camera.lookAt(camera.position.x + Math.sin(ly) * 10, p.y - 0.35, camera.position.z + Math.cos(ly) * 10);
+    // The head leans into a check: toward the window for a side look,
+    // toward the middle of the car (and up) for a look over the shoulder.
+    const turn = Math.min(1, Math.abs(headYaw) / 1.35);
+    const lean = Math.min(1, Math.abs(headYaw) / 2.45);
+    const ex = p.x + Math.sign(headYaw) * turn * 0.1 + (Math.abs(headYaw) > 1.4 ? c.seat * -lean * 0.25 : 0);
+    const ey = p.y + lean * 0.05;
+    const ez = p.z - lean * 0.12;
+    camera.position.set(c.x + fx * ez - rx * ex, ey, c.z + fz * ez - rz * ex);
+    const ly = c.yaw + lookOffset + headYaw;
+    camera.lookAt(camera.position.x + Math.sin(ly) * 10, ey - 0.35, camera.position.z + Math.cos(ly) * 10);
     return;
   }
   // Chase camera swings behind the car, further out with speed.
-  const want = c.yaw + Math.PI + lookOffset;
+  const want = c.yaw + Math.PI + lookOffset + headYaw;
   me.camYaw = lerpAngle(me.camYaw, want, Math.min(1, dt * 3.5));
   let dist = (c.kind === "danfo" ? 9 : 7.2) + Math.min(3, c.speed * 0.06);
   const height = c.kind === "danfo" ? 4.2 : 3.1;
@@ -798,7 +862,7 @@ function updateWheelMon(dt: number) {
 g29.onChange = (on) => {
   refreshWheelButton();
   if (on) openWheelMon(true);
-  if (on) toast("G29 connected 🎮 force feedback on. ✕ handbrake · □ horn · △ camera · ○ get out");
+  if (on) toast("Wheel connected 🎮 Paddles: gear · L2/R2: indicators · L3: lights · R3: wipers · Share: hazards · ✕: parking brake · clutch pedal: handbrake · hold d-pad ◀ ▶ to check over your shoulder");
 };
 void g29.restore().then(refreshWheelButton);
 $("wheel-connect").addEventListener("click", async () => {

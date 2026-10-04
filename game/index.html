@@ -39,7 +39,11 @@
       <label class="wm-swap"><input type="checkbox" id="wm-swap" /> Swap gas ↔ brake</label>
       <p class="wm-tip">Press each pedal: the matching bar should fill. Nothing moving? Click 🎮 Connect wheel. Still nothing? Set the switch on the wheel to <b>PS3</b>, replug, and try again.</p>
     </div>
-    <div id="speedo" hidden><b id="kmh">0</b><span>km/h</span><i id="gear">1</i></div>
+    <div id="speedo" hidden>
+      <div class="sp-row"><i id="ind-l" class="ind">◀</i><b id="kmh">0</b><span>km/h</span><i id="ind-r" class="ind">▶</i></div>
+      <div id="prnd"><b data-g="P">P</b><b data-g="R">R</b><b data-g="N">N</b><b data-g="D">D</b></div>
+      <div class="tt"><i id="tt-park" title="Parking brake">(P)</i><i id="tt-lights" title="Headlights">◐</i><i id="tt-wipers" title="Wipers"></i></div>
+    </div>
     <div id="calib" hidden><div class="calib-box"><h2 id="calib-title"></h2><p id="calib-hint"></p></div></div>
     <div id="debug" hidden></div>
     <div id="labels"></div>

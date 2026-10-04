@@ -211,7 +211,7 @@ def main():
                 if h is None or h < 2.5:
                     h, src = guess_height(bid, area, args.style), "guess"
             height_src[src] += 1
-            # Counter-clockwise in the x/z plane (seen from above, with z south) for consistent walls.
+            # Clockwise in shapely terms; the client re-orients rings itself, so this is just a stable order.
             if shapely.Polygon(ring).exterior.is_ccw:
                 ring = ring[::-1]
             buildings.append((min(h, 120.0), ring))

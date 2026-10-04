@@ -10,6 +10,13 @@ import type { World } from "./world";
 // away under the handbrake, and wall collisions against real Yaba buildings.
 
 export type VehicleKind = "car" | "danfo";
+/** Automatic gear selector. */
+export type Selector = "P" | "R" | "N" | "D";
+const SELECTOR: Selector[] = ["P", "R", "N", "D"];
+/** Reverse is geared low: about 25 km/h flat out. */
+const REVERSE_TOP = 7;
+/** Idle creep in D and R: an automatic rolls at walking pace with no pedals. */
+const CREEP_SPEED = 1.8;
 
 interface Spec {
   mass: number;
@@ -59,6 +66,28 @@ export class PlayerVehicle {
   /** impact speed of a collision this frame (m/s), 0 if none */
   impact = 0;
 
+  selector: Selector = "P";
+  parkBrake = true;
+  /** -1 left, +1 right, 0 off. */
+  indicator = 0;
+  hazards = false;
+  /** 0 off, 1 dipped, 2 full beam. */
+  lights = 0;
+  /** 0 off, 1 intermittent, 2 normal, 3 fast. */
+  wipers = 0;
+  /** Indicator flasher state: true while the lamps are lit. */
+  blinkOn = false;
+  private blinkT = 0;
+  /** How far the wheel went in the signalled direction, for self-cancelling. */
+  private indPeak = 0;
+  private wiperT = 0;
+  private wiperPause = 0;
+  private wiperArms: THREE.Object3D[] = [];
+  private lamps: Record<"indL" | "indR" | "brake" | "head" | "reverse", THREE.MeshBasicNodeMaterial>;
+  /** Events for the frame, for sounds: flasher relay and wiper end-of-sweep. */
+  ticked: boolean | null = null;
+  wiped = false;
+
   /** Driver's seat side: +1 left-hand drive (Lagos), -1 right-hand drive (Ireland). */
   readonly seat: number;
 
@@ -95,9 +124,172 @@ export class PlayerVehicle {
     this.steeringWheel.position.set(c.x, c.y - 0.42, c.z + 0.68);
     this.steeringWheel.rotation.x = -0.45;
     this.cockpitGroup.add(this.steeringWheel);
+    this.buildCabin(mat);
     this.cockpitGroup.visible = false;
+    this.lamps = this.buildLamps();
     this.root.add(this.cockpitGroup);
     this.sync();
+  }
+
+  /**
+   * Pillars, roof and door tops around the driver, so the head check has
+   * real blind spots, plus two wiper arms on the base of the windscreen.
+   */
+  private buildCabin(mat: THREE.Material) {
+    const c = this.spec.cockpit;
+    const w = this.spec.width;
+    const trim = 0x2e2b29, roof = 0x8a857c;
+    // Windscreen from the dash top (low, forward) to the roof (high, back).
+    const baseY = c.y - 0.44, baseZ = c.z + 1.12, topY = c.y + 0.3, topZ = c.z + 0.45;
+    const len = Math.hypot(topY - baseY, topZ - baseZ);
+    const tilt = Math.atan2(baseZ - topZ, topY - baseY);
+    const pillar = (x: number) => new THREE.BoxGeometry(0.09, len, 0.07).rotateX(-tilt).translate(x, (baseY + topY) / 2, (baseZ + topZ) / 2);
+    const bp = (x: number) => new THREE.BoxGeometry(0.12, 0.8, 0.14).translate(x, c.y - 0.1, c.z - 0.55);
+    const half = w / 2 - 0.06;
+    const parts: [THREE.BufferGeometry, number][] = [
+      [pillar(-half), trim], [pillar(half), trim],
+      [bp(-half), trim], [bp(half), trim],
+      [new THREE.BoxGeometry(w - 0.1, 0.05, 1.7).translate(0, topY + 0.02, topZ - 0.75), roof],
+      [new THREE.BoxGeometry(w - 0.1, 0.07, 0.08).translate(0, topY - 0.02, topZ), trim],
+      // Door tops and window sills either side.
+      [new THREE.BoxGeometry(0.1, 0.06, 1.9).translate(-half, c.y - 0.4, c.z + 0.1), trim],
+      [new THREE.BoxGeometry(0.1, 0.06, 1.9).translate(half, c.y - 0.4, c.z + 0.1), trim],
+      [new THREE.BoxGeometry(0.06, 0.5, 1.9).translate(-half - 0.02, c.y - 0.68, c.z + 0.1), 0x3a3633],
+      [new THREE.BoxGeometry(0.06, 0.5, 1.9).translate(half + 0.02, c.y - 0.68, c.z + 0.1), 0x3a3633],
+    ];
+    this.cockpitGroup.add(new THREE.Mesh(templateGeometry(makeTemplate(parts)), mat));
+
+    // Wipers: a frame lying in the glass plane, arms pivoting within it.
+    const glass = new THREE.Group();
+    glass.position.set(0, baseY + 0.03, baseZ - 0.03);
+    glass.rotation.x = -tilt;
+    const blade = templateGeometry(
+      makeTemplate([
+        [new THREE.BoxGeometry(0.62, 0.018, 0.018).translate(0.31, 0, 0), 0x111111],
+        [new THREE.BoxGeometry(0.5, 0.028, 0.012).translate(0.36, 0.012, -0.012), 0x0c0c0c],
+      ]),
+    );
+    for (const x of [-0.62, 0.02]) {
+      const arm = new THREE.Mesh(blade, mat);
+      arm.position.set(x * (w / 1.8), 0, 0);
+      glass.add(arm);
+      this.wiperArms.push(arm);
+    }
+    this.cockpitGroup.add(glass);
+  }
+
+  /** Indicator, brake, reverse and head lamps on the body, lit by colour. */
+  private buildLamps() {
+    // Just proud of the body box (car 4.2 m, danfo 4.6 m long).
+    const L = (this.kind === "danfo" ? 2.3 : 2.1) + 0.03;
+    const W = this.spec.width / 2;
+    const y = this.kind === "danfo" ? 0.75 : 0.62;
+    const mk = () => new THREE.MeshBasicNodeMaterial({ color: 0x000000 });
+    const lamps = { indL: mk(), indR: mk(), brake: mk(), head: mk(), reverse: mk() };
+    const add = (m: THREE.MeshBasicNodeMaterial, x: number, z: number, sw = 0.22, sh = 0.1) => {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(sw, sh, 0.05), m);
+      mesh.position.set(x, y, z);
+      this.body.add(mesh);
+    };
+    // +x is the car's left (forward is +z, right is -x).
+    for (const s of [1, -1]) {
+      add(s > 0 ? lamps.indL : lamps.indR, s * (W - 0.1), L, 0.14, 0.08);
+      add(s > 0 ? lamps.indL : lamps.indR, s * (W - 0.1), -L, 0.14, 0.08);
+      add(lamps.head, s * (W - 0.38), L, 0.3, 0.12);
+      add(lamps.brake, s * (W - 0.34), -L, 0.26, 0.12);
+      add(lamps.reverse, s * (W - 0.58), -L, 0.12, 0.08);
+    }
+    return lamps;
+  }
+
+  /** Gear selector one step toward P (-1) or D (+1). Returns why not, if refused. */
+  shift(dir: -1 | 1, brake: number): string | null {
+    const i = SELECTOR.indexOf(this.selector) + dir;
+    if (i < 0 || i >= SELECTOR.length) return null;
+    const to = SELECTOR[i];
+    if (this.selector === "P" && brake < 0.15) return "Foot on the brake to shift out of P";
+    if (to === "P" && Math.abs(this.vf) > 0.5) return "Stop the car before selecting P";
+    if (to === "R" && this.vf > 1) return "Stop the car before selecting R";
+    if (to === "D" && this.vf < -1) return "Stop the car before selecting D";
+    this.selector = to;
+    return null;
+  }
+
+  /** Buttons that don't touch the physics: indicators, hazards, lights, wipers, parking brake. */
+  controls(inp: DriveInput, dt: number) {
+    if (inp.indicatorLeft) this.setIndicator(this.indicator === -1 ? 0 : -1);
+    if (inp.indicatorRight) this.setIndicator(this.indicator === 1 ? 0 : 1);
+    if (inp.hazards) this.hazards = !this.hazards;
+    if (inp.lights) this.lights = (this.lights + 1) % 3;
+    if (inp.wipers) {
+      this.wipers = (this.wipers + 1) % 4;
+      this.wiperPause = 0;
+    }
+    if (inp.parkBrake) this.parkBrake = !this.parkBrake;
+    // Drive-away release, like an electronic parking brake.
+    if (this.parkBrake && inp.throttle > 0.15 && (this.selector === "D" || this.selector === "R")) this.parkBrake = false;
+
+    // Self-cancel: once the wheel has turned well into the signalled
+    // direction, straightening up switches the indicator off.
+    if (this.indicator) {
+      const turned = inp.steer * this.indicator; // both are + for right, - for left
+      this.indPeak = Math.max(this.indPeak, turned);
+      if (this.indPeak > 0.12 && turned < 0.03) this.setIndicator(0);
+    }
+
+    // Flasher relay at ~1.5 Hz.
+    this.ticked = null;
+    if (this.indicator || this.hazards) {
+      this.blinkT += dt;
+      if (this.blinkT >= 0.36) {
+        this.blinkT -= 0.36;
+        this.blinkOn = !this.blinkOn;
+        this.ticked = this.blinkOn;
+      }
+    } else if (this.blinkOn) {
+      this.blinkOn = false;
+      this.ticked = false;
+    }
+
+    // Wipers: one sweep up and back is 1.1 s (normal), 0.7 s (fast); intermittent waits between.
+    this.wiped = false;
+    if (this.wipers || this.wiperT > 0) {
+      if (this.wiperPause > 0) this.wiperPause -= dt;
+      else {
+        const period = this.wipers === 3 ? 0.7 : 1.1;
+        const before = this.wiperT;
+        this.wiperT += dt / period;
+        if (before < 0.5 && this.wiperT >= 0.5) this.wiped = true;
+        if (this.wiperT >= 1) {
+          this.wiperT = this.wipers ? this.wiperT - 1 : 0;
+          if (this.wipers === 1) {
+            this.wiperT = 0;
+            this.wiperPause = 2.4;
+          }
+          if (this.wipers) this.wiped = true;
+        }
+      }
+    }
+    const sweep = (1 - Math.cos(this.wiperT * Math.PI * 2)) / 2;
+    for (const a of this.wiperArms) a.rotation.z = sweep * 1.55;
+
+    // Lamps. Colours above 1 feed the bloom.
+    const left = this.blinkOn && (this.indicator === -1 || this.hazards);
+    const right = this.blinkOn && (this.indicator === 1 || this.hazards);
+    this.lamps.indL.color.setRGB(left ? 4 : 0.25, left ? 1.6 : 0.12, left ? 0.1 : 0.02);
+    this.lamps.indR.color.setRGB(right ? 4 : 0.25, right ? 1.6 : 0.12, right ? 0.1 : 0.02);
+    const braking = inp.brake > 0.05;
+    this.lamps.brake.color.setRGB(braking ? 5 : this.lights ? 1.4 : 0.3, braking ? 0.15 : 0.03, braking ? 0.1 : 0.03);
+    const rev = this.selector === "R";
+    this.lamps.reverse.color.setRGB(rev ? 3 : 0.5, rev ? 3 : 0.5, rev ? 3 : 0.5);
+    const hb = this.lights === 2 ? 5 : this.lights ? 3 : 0.6;
+    this.lamps.head.color.setRGB(hb, hb, hb * 0.92);
+  }
+
+  private setIndicator(v: number) {
+    this.indicator = v;
+    this.indPeak = 0;
+    if (v && !this.blinkOn) this.blinkT = 0.36; // light on the very next frame
   }
 
   get speed() {
@@ -132,17 +324,29 @@ export class PlayerVehicle {
     const steerRate = inp.device === "wheel" ? 30 : 4;
     this.steerAngle += Math.max(-steerRate * h, Math.min(steerRate * h, target - this.steerAngle));
 
-    // Longitudinal: throttle drives forward; brake slows, then reverses when stopped.
-    let force = 0;
-    if (inp.throttle > 0) force += inp.throttle * s.engine * (speed < 0 ? 1.6 : 1) * (1 - Math.max(0, speed) / (s.gears[s.gears.length - 1] * 1.05));
-    if (inp.brake > 0) {
-      if (speed > 0.5) force -= inp.brake * s.brake;
-      else force -= inp.brake * s.engine * 0.45 * (1 + speed / 8); // reverse
+    // Longitudinal. The selector decides which way the engine pushes; the
+    // brakes only ever slow the car toward zero, never push it backwards.
+    const dir = this.selector === "D" ? 1 : this.selector === "R" ? -1 : 0;
+    let drive = 0;
+    if (dir) {
+      const v = speed * dir; // speed in the selected direction
+      const top = dir > 0 ? s.gears[s.gears.length - 1] * 1.05 : REVERSE_TOP;
+      const pull = inp.throttle * s.engine * (dir < 0 ? 0.6 : 1) * Math.max(0, 1 - Math.max(0, v) / top);
+      // Torque converter creep, fading as the pedal takes over.
+      const creep = v < CREEP_SPEED ? s.engine * 0.11 * (1 - Math.max(0, v) / CREEP_SPEED) * (1 - inp.throttle) : 0;
+      // Engine braking against the selected direction (e.g. rolling back in D).
+      const resist = v < 0 ? -v * s.mass * 0.6 : 0;
+      drive = dir * (pull + creep + resist);
     }
-    if (inp.handbrake) force -= Math.sign(speed) * s.brake * 0.35;
-    force -= s.drag * speed * Math.abs(speed) + s.roll * speed;
-    this.vf += (force / s.mass) * h;
-    if (inp.throttle === 0 && inp.brake === 0 && Math.abs(this.vf) < 0.15) this.vf = 0;
+    drive -= s.drag * speed * Math.abs(speed) + s.roll * speed;
+    this.vf += (drive / s.mass) * h;
+
+    let stop = inp.brake * s.brake + s.mass * 0.15; // pedal + rolling resistance
+    if (inp.handbrake) stop += s.brake * 0.35;
+    if (this.parkBrake) stop += s.brake * 0.6;
+    if (this.selector === "P") stop += s.brake * 2; // parking pawl
+    const dv = (stop / s.mass) * h;
+    this.vf = Math.abs(this.vf) <= dv ? 0 : this.vf - Math.sign(this.vf) * dv;
 
     // Yaw follows the bicycle model; lateral slip decays at the grip rate.
     // With x east and z south, increasing yaw turns the car LEFT, so a right
@@ -167,11 +371,20 @@ export class PlayerVehicle {
 
     // Gear and rpm for the engine sound.
     const v = Math.abs(this.vf);
-    let g = 0;
-    while (g < s.gears.length - 1 && v > s.gears[g] * 0.95) g++;
-    this.gear = g + 1;
-    const lo = g === 0 ? 0 : s.gears[g - 1] * 0.6;
-    this.rpm = Math.min(1, Math.max(0.12, (v - lo) / (s.gears[g] - lo)) * 0.85 + inp.throttle * 0.15);
+    if (dir > 0) {
+      let g = 0;
+      while (g < s.gears.length - 1 && v > s.gears[g] * 0.95) g++;
+      this.gear = g + 1;
+      const lo = g === 0 ? 0 : s.gears[g - 1] * 0.6;
+      this.rpm = Math.min(1, Math.max(0.12, (v - lo) / (s.gears[g] - lo)) * 0.85 + inp.throttle * 0.15);
+    } else if (dir < 0) {
+      this.gear = 1;
+      this.rpm = Math.min(1, Math.max(0.12, v / REVERSE_TOP) * 0.85 + inp.throttle * 0.15);
+    } else {
+      // P or N: the engine revs freely.
+      this.gear = 0;
+      this.rpm += (0.12 + inp.throttle * 0.85 - this.rpm) * Math.min(1, h * 4);
+    }
   }
 
   /** Three circles along the body against building walls. */
