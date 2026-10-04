@@ -458,7 +458,7 @@ export class PlayerVehicle {
     // A real wheel is the steering wheel, 1:1 through the steering ratio. Keys
     // and pads get less lock at speed, capped near the tyres' grip limit, as in
     // every driving game.
-    if (inp.device === "wheel") this.steerCmd = inp.steer;
+    if (inp.device === "wheel" || inp.device === "auto") this.steerCmd = inp.steer;
     else {
       const v = Math.max(1, Math.abs(this.vf));
       const lock = Math.min(1, Math.atan(((ps.cgToFront + ps.cgToRear) * 0.8 * 9.81) / (v * v)) / ps.maxSteer);

@@ -230,8 +230,8 @@ export class Navigator {
     this.instructions = out;
   }
 
-  /** Route distance at the start of a link's junction curve. */
-  private pathAt(link: Link): number {
+  /** Distance along the route path where `link` leaves its lane (the stop line). */
+  pathAt(link: Link): number {
     const l = this.net.lanes[link.from];
     const ex = l.pts[l.pts.length - 2], ez = l.pts[l.pts.length - 1];
     let best = 0, bd = Infinity;

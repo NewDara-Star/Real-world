@@ -38,6 +38,28 @@ npm run build && npx wrangler dev   # http://127.0.0.1:8787
 URL options: `?city=finglas`, `?time=13` (hour of day), `?debug=1` (frame
 rate, draw calls, and the `__car`, `__traffic`, `__me` handles).
 
+## Autodrive and screenshots (dev)
+
+`?autodrive=happy|sad|idiot|tragedy` puts a robot in the car on sat-nav routes
+(`src/client/autodrive.ts`); a label at the top says what it's doing and why.
+
+- **happy:** a careful learner (limits, lights, give way, indicators, mirrors).
+- **sad:** missed turns (reroutes), a street with no way in, stuck in a queue, parking.
+- **idiot:** speeding, no indicators, some red lights and give-ways, the kerb, R at speed.
+- **tragedy:** the farthest places and the map edges, for as long as it runs.
+
+Screenshot mode in the desktop app (real GPU), for checking how places look:
+
+```sh
+npm run build
+WORLD_AUTODRIVE=happy WORLD_SHOTS=shots/happy npx electron .
+# options: WORLD_CITY=finglas WORLD_SHOT_EVERY=15 WORLD_SHOT_COUNT=40
+#          WORLD_TIME=21 (hour) WORLD_TIMESCALE=60 (an hour a minute)
+```
+
+Each `NNN.png` has an `NNN.json` beside it: where (street, x/z), speed, what
+the driver is doing and why, destination, examiner faults, frame rate.
+
 ## Checks
 
 ```sh

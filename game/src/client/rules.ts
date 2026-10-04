@@ -36,10 +36,13 @@ export class Examiner {
 
   private t = 0;
   private approach: { lane: Lane; minSpeed: number; dist: number } | null = null;
+  private entering: { from: { lane: Lane; minSpeed: number }; time: number; t: number; at: CarState } | null = null;
   private indOnSince: Record<number, number> = { [-1]: -1, [1]: -1 };
   private lastIndicator = 0;
   private lastLook: Record<string, number> = { left: -99, right: -99, back: -99, mirror: -99 };
   private overT = 0;
+  /** Worst grade already marked for the current time over the limit. */
+  private speedGrade = 0;
   private wrongT = 0;
   private pathT = 0;
   private stoppedT = 0;
@@ -95,10 +98,16 @@ export class Examiner {
 
       // Speed against the posted limit (2 km/h of slack for the speedo).
       const lim = lane.speed;
+      // One fault per time over the limit (the RSA marks the occurrence, not
+      // every km/h of it), raised to grade 3 if it gets more than 15% over.
       this.overT = speed > lim + 0.6 ? this.overT + dt : 0;
+      if (this.overT === 0) this.speedGrade = 0;
       if (this.overT > 2) {
-        const pct = speed / lim - 1;
-        this.fault(pct > 0.15 ? 3 : 2, "speed", `Speeding: ${Math.round(speed * 3.6)} in a ${this.limit} zone`, 12);
+        const grade = speed / lim - 1 > 0.15 ? 3 : 2;
+        if (grade > this.speedGrade) {
+          this.speedGrade = grade;
+          this.fault(grade, "speed", `Speeding: ${Math.round(speed * 3.6)} in a ${this.limit} zone`, 0);
+        }
       }
 
       // Approaching a junction: remember the slowest speed near the line.
@@ -120,24 +129,33 @@ export class Examiner {
         this.stoppedT = 0;
       }
     } else if (lane.kind === LaneKind.Internal && this.approach) {
-      // Just crossed the line into the junction: judge the approach.
-      const from = this.approach;
+      // Just crossed the line into the junction: note how things stood at the
+      // line. Which way it's going can't be told yet: the curves for straight
+      // on and turning start at the same point.
+      if (c.vf > 0) this.entering = { from: this.approach, time: this.traffic.time, t: this.t, at: { ...c } };
       this.approach = null;
-      const link = from.lane.out.map((k) => this.net.links[k]).find((k) => k.vias.includes(lane.id));
-      if (link && c.vf > 0) this.judgeJunction(link, from, c);
+    }
+    // A few metres in, the curve the car is on says which way it went.
+    const e = this.entering;
+    if (e && (lane.kind !== LaneKind.Internal || hit.s > 4)) {
+      this.entering = null;
+      const links = e.from.lane.out.map((k) => this.net.links[k]);
+      const link = lane.kind === LaneKind.Internal ? links.find((k) => k.vias.includes(lane.id)) : links.find((k) => k.to === lane.id);
+      if (link) this.judgeJunction(link, e.from, e.at, e.time, e.t);
     }
   }
 
-  private judgeJunction(L: Link, from: { lane: Lane; minSpeed: number }, c: CarState) {
+  /** Judged at the line: the light then, the indicator then (it cancels as the wheel straightens). */
+  private judgeJunction(L: Link, from: { lane: Lane; minSpeed: number }, c: CarState, time: number, now: number) {
     const net = this.net;
     const e = from.lane.edge >= 0 ? net.edges[from.lane.edge] : null;
     let minor = L.state === "m" || L.state === "s";
     if (L.tl >= 0) {
-      const st = net.signalState(L.tl, L.li, this.traffic.time);
+      const st = net.signalState(L.tl, L.li, time);
       if (st === "r" || st === "u") this.fault(3, "traffic lights", "Entered the junction on a red light", 3);
       else if (st === "y" || st === "Y") {
         // Amber means stop unless stopping would be unsafe.
-        const amberFor = 3 - net.signalRemaining(L.tl, L.li, this.traffic.time);
+        const amberFor = 3 - net.signalRemaining(L.tl, L.li, time);
         if (amberFor > 1.2) this.fault(2, "traffic lights", "Went through on amber when you could have stopped", 3);
       }
       minor = st === "g";
@@ -154,10 +172,10 @@ export class Examiner {
     const side = want === -1 ? "left" : "right";
     if (want) {
       if (c.indicator !== want && !c.hazards) this.fault(2, "signals", `No signal turning ${side}`, 3);
-      else if (this.t - this.indOnSince[want] < 2) this.fault(1, "signals", `Signalled late turning ${side}`, 3);
+      else if (now - this.indOnSince[want] < 2) this.fault(1, "signals", `Signalled late turning ${side}`, 3);
       // Observation: in left-hand traffic, a left turn needs the left mirror or a head check for cyclists.
-      if (want === -1 && this.t - Math.max(this.lastLook.left, this.lastLook.mirror) > 8) this.fault(2, "observation", "Turning left: no check of the left mirror or blind spot", 3);
-    } else if (c.indicator && L.dir === "s" && this.t - this.indOnSince[c.indicator] > 3) {
+      if (want === -1 && now - Math.max(this.lastLook.left, this.lastLook.mirror) > 8) this.fault(2, "observation", "Turning left: no check of the left mirror or blind spot", 3);
+    } else if (c.indicator && L.dir === "s" && now - this.indOnSince[c.indicator] > 3) {
       this.fault(1, "signals", "Misleading signal going straight on", 3);
     }
   }

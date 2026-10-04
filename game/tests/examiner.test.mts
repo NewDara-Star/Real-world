@@ -15,7 +15,7 @@ type Plan = (s: number, light: string, distLeft: number) => { v: number; ind: nu
 function drive(plan: Plan) {
   const traffic = new NetTraffic(net, { honk() {} }, { vehicles: 0, walkers: 0 });
   const ex = new Examiner(net, traffic);
-  const faults: { grade: number; text: string }[] = [];
+  const faults: { grade: number; item: string; text: string }[] = [];
   ex.onFault = (f) => faults.push(f);
   let li = 0, s = 0;
   const dt = 1 / 30;
@@ -37,6 +37,13 @@ function drive(plan: Plan) {
 const careless = drive(() => ({ v: lane.speed * 1.25, ind: 0, glance: false }));
 check("a careless drive collects faults", careless.length >= 2, careless.map((f) => `G${f.grade} ${f.text}`).join("; "));
 check("speeding is marked", careless.some((f) => /speed/i.test(f.text)));
+
+// Bug reproduced (the idiot autodrive): the fault's cooldown was keyed by its
+// text, so creeping from 52 to 69 km/h in a 50 zone was 18 separate faults.
+let t = 0;
+const creeping = drive(() => ({ v: lane.speed * (1.05 + Math.min(0.3, (t += 1 / 30) * 0.03)), ind: 0, glance: false }));
+const speeding = creeping.filter((f) => f.item === "speed");
+check("one speeding fault per time over the limit (raised once if it gets worse)", speeding.length >= 1 && speeding.length <= 2, speeding.map((f) => `G${f.grade} ${f.text}`).join("; "));
 
 const careful = drive((_s, light, dist) => {
   const stopping = dist >= 0 && dist < 25 && light !== "G" && light !== "g";

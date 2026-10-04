@@ -32,7 +32,8 @@ export interface DriveInput {
   lookBack: boolean;
   /** Held: glance at the passenger-side wing mirror. */
   glance: boolean;
-  device: "keyboard" | "gamepad" | "wheel";
+  /** "auto": the dev autodrive (autodrive.ts) is driving; steers 1:1 like a wheel. */
+  device: "keyboard" | "gamepad" | "wheel" | "auto";
   /**
    * A wheel is plugged in but the keyboard is steering (A/D pressed since the
    * wheel last turned). Force feedback stays off then, so the wheel doesn't

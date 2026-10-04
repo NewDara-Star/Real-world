@@ -9,10 +9,15 @@ engines, published data), then build. See `research/` for the notes.
 Seen by running the desktop app at 13:00 in Finglas. For the cloud dev to
 slot into the order below:
 
-- **Dev-only autodrive** (`?autodrive=1`): hand the player car to the AI
-  driver along the sat-nav route, so a local Claude (or a test) can drive a
-  route and screenshot it. Driving by key bursts between screenshots left
-  the road within 100 m.
+- **Dev autodrive:** built (`?autodrive=happy|sad|idiot|tragedy`, and a
+  screenshot mode in the desktop app, see `game/README.md`). Headless on
+  Finglas: happy drives with no examiner faults, idiot gets caught, sad
+  reroutes after missed turns. It found: the examiner marked speeding once
+  per km/h (fixed), judged some junctions on the wrong curve (fixed), and
+  **3 of Finglas's 83 signals run 6-7 minute cycles** (SUMO's
+  `--tls.join` merged clusters, 11 phase groups): fix in `build_net.sh`
+  (smaller join distance or capped cycle), still open. Also open: the fps
+  meter ignores frames over 1 s, so a very slow machine reads 60.
 - **The wheel silently overrides the keyboard:** fixed. Pedals take the
   harder press of wheel and keyboard; steering goes to whichever was touched
   last (A/D, or turning the wheel ~13°), with a message when it changes and

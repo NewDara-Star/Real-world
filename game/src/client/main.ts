@@ -26,6 +26,7 @@ import { templateGeometry } from "./props";
 import { carTemplate, danfoTemplate } from "./traffic";
 import { DriveControls, runCalibration } from "./wheel";
 import { G29 } from "./g29";
+import { AUTO_MODES, AutoDriver, type AutoMode } from "./autodrive";
 
 // ---------------------------------------------------------------- setup ----
 
@@ -290,6 +291,7 @@ world
     placeCamera(1);
     gfx.follow(me.pos.x, me.pos.z);
     gfx.render();
+    if (AUTODRIVE) void startAutodrive(AUTODRIVE);
   })
   .catch((e) => {
     enterBtn.textContent = "Couldn't load Lagos. Refresh 🙏🏾";
@@ -808,9 +810,67 @@ function exitVehicle() {
 }
 
 let keyboardSteering = false;
+
+// ------------------------------------------------------------ autodrive ----
+// ?autodrive=happy|sad|idiot|tragedy: straight into the car, a robot drives
+// (autodrive.ts). window.__autodrive.snapshot() is what the desktop app's
+// screenshot mode (WORLD_SHOTS, desktop/main.cjs) saves beside each picture.
+
+const AUTODRIVE = (AUTO_MODES as string[]).includes(params.get("autodrive") ?? "") ? (params.get("autodrive") as AutoMode) : null;
+let autoDriver: AutoDriver | null = null;
+let autoLabelT = 0;
+const autoLabel = document.createElement("div");
+autoLabel.style.cssText = "position:fixed;top:56px;left:50%;transform:translateX(-50%);padding:6px 14px;border-radius:14px;background:rgba(20,20,24,.78);color:#ffd166;font:600 13px system-ui;z-index:30;pointer-events:none;white-space:nowrap";
+
+async function startAutodrive(mode: AutoMode) {
+  enterBtn.click();
+  while (!physicsReady()) await new Promise((r) => setTimeout(r, 200));
+  enterVehicle("car");
+  if (!car || !world.net || !navigator_) {
+    autoLabel.textContent = "AUTODRIVE needs a place with a road network";
+    document.body.append(autoLabel);
+    return;
+  }
+  const places = world.meta.places.map((p) => ({ x: p.x, z: p.z, name: p.name }));
+  autoDriver = new AutoDriver(world.net, navigator_, traffic instanceof NetTraffic ? traffic : null, mode, places, world.meta.half, car.spec.physics.maxSteer, Number(params.get("seed")) || 1);
+  autoDriver.setDestination = (d) => setDestination(d);
+  document.body.append(autoLabel);
+  const ad = autoDriver;
+  Object.assign(window, {
+    __autodrive: {
+      ready: true,
+      snapshot: () => {
+        const c = car;
+        return {
+          ...(c ? ad.snapshot({ x: c.x, z: c.z, yaw: c.yaw, vf: c.vf, indicator: c.indicator }) : { mode: ad.mode, status: "on foot" }),
+          street: $("where").textContent?.replace("📍 ", "") ?? "",
+          hour: Math.round(gameHours * 100) / 100,
+          fps: Math.round(fps),
+          faults: examiner?.faults.map((f) => `G${f.grade} ${f.text}`) ?? [],
+        };
+      },
+    },
+  });
+}
+
 function driveFrame(dt: number, now: number) {
   const c = car!;
   const inp = drive.read(dt);
+  if (autoDriver) {
+    // Dev autodrive: the robot has the controls (keys still work for camera, map, pause).
+    const a = autoDriver.step(dt, { x: c.x, z: c.z, yaw: c.yaw, vf: c.vf, indicator: c.indicator });
+    Object.assign(inp, { steer: a.steer, throttle: a.throttle, brake: a.brake, handbrake: a.handbrake, glance: a.glance, look: a.look, device: "auto", shift: 0, keyboardSteering: false });
+    c.selector = a.selector;
+    c.parkBrake = a.parkBrake;
+    // The indicator stalk toggles: press the side wanted, or the lit side to cancel.
+    inp.indicatorLeft = a.indicator === -1 ? c.indicator !== -1 : a.indicator === 0 && c.indicator === -1;
+    inp.indicatorRight = a.indicator === 1 ? c.indicator !== 1 : a.indicator === 0 && c.indicator === 1;
+    autoLabelT -= dt;
+    if (autoLabelT <= 0) {
+      autoLabelT = 0.25;
+      autoLabel.textContent = `AUTODRIVE ${autoDriver.mode.toUpperCase()} · ${autoDriver.status}`;
+    }
+  }
   // Touch: the left-thumb joystick doubles as steering and pedals.
   if (isTouch && inp.device === "keyboard") {
     input.update();
@@ -874,8 +934,8 @@ function driveFrame(dt: number, now: number) {
     void g29.setSpring(0);
     void g29.setDamper(0.13 + 0.2 * Math.max(0, 1 - c.speed / 8));
     const align = c.phys.steerTorque * 0.045;
-    // While the keyboard steers, no force: it would turn the wheel by itself.
-    void g29.setForce(inp.keyboardSteering ? 0 : dir * minForce(ffb.gain * (align + ffbJolt)));
+    // While the keyboard (or the autodrive) steers, no force: it would turn the wheel by itself.
+    void g29.setForce(inp.keyboardSteering || inp.device === "auto" ? 0 : dir * minForce(ffb.gain * (align + ffbJolt)));
     void g29.setRevLights(c.rpm > 0.35 ? (c.rpm - 0.35) / 0.6 : 0);
   }
   if (inp.horn && hornCooldown <= 0) {
@@ -1152,20 +1212,23 @@ function say(text: string) {
     // no voice available
   }
 }
-function setDestination(d: { x: number; z: number; name: string } | null) {
-  if (!navigator_) return;
+function setDestination(d: { x: number; z: number; name: string } | null): boolean {
+  if (!navigator_) return false;
   spoken.clear();
   if (!d) {
     navigator_.clear();
     $("navbar").hidden = true;
-    return;
+    return false;
   }
   const x = car ? car.x : me.pos.x, z = car ? car.z : me.pos.z, yaw = car ? car.yaw : me.yaw;
   if (navigator_.route(x, z, yaw, d)) {
     const km = navigator_.total / 1000;
     toast(`Route to ${d.name}: ${km < 1 ? `${Math.round(navigator_.total)} m` : `${km.toFixed(1)} km`}`);
     say(`Route set to ${d.name}`);
-  } else toast(`Couldn't find a road route to ${d.name}`);
+    return true;
+  }
+  toast(`Couldn't find a road route to ${d.name}`);
+  return false;
 }
 const NAV_ICON: Record<string, string> = { left: "↰", right: "↱", "slight-left": "↖", "slight-right": "↗", straight: "↑", uturn: "↶", arrive: "🏁" };
 let miniTimer = 0;
