@@ -1,0 +1,11 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "eko-world",
+  "main": "src/server/index.ts",
+  "compatibility_date": "2026-09-01",
+  "assets": { "directory": "./dist", "not_found_handling": "single-page-application", "run_worker_first": ["/ws"] },
+  "durable_objects": { "bindings": [{ "name": "ZONE", "class_name": "Zone" }] },
+  // SQLite-backed Durable Objects are available on the Workers free plan.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Zone"] }],
+  "observability": { "enabled": true }
+}
