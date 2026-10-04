@@ -11,6 +11,9 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     base="$(git merge-base "$local_sha" "$remote/main" 2>/dev/null || git rev-list --max-parents=0 "$local_sha" | tail -1)"
   else
     base="$remote_sha"
+    # Someone else pushed first: their commits aren't here yet.
+    git cat-file -e "$remote_sha^{commit}" 2>/dev/null || fail "$remote_ref has commits you don't have (someone else pushed)." \
+      "Pull them in first: git pull --rebase $remote ${remote_ref#refs/heads/}, then push again."
   fi
   changed="$(git diff --name-only "$base" "$local_sha")"
   [ -z "$changed" ] && continue
