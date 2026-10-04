@@ -1,0 +1,222 @@
+{
+ "Yaba": {
+  "by_source": {
+   "Google Open Buildings": {
+    "n": 1183,
+    "height": 0,
+    "floors": 0
+   },
+   "OpenStreetMap": {
+    "n": 7168,
+    "height": 1,
+    "floors": 1
+   },
+   "Microsoft ML Buildings": {
+    "n": 183,
+    "height": 0,
+    "floors": 0
+   }
+  },
+  "footprint_m2": 1195869,
+  "cell_km2": 3.96,
+  "built_cover_pct": 30.2
+ },
+ "Surulere": {
+  "by_source": {
+   "Microsoft ML Buildings": {
+    "n": 102,
+    "height": 0,
+    "floors": 0
+   },
+   "Google Open Buildings": {
+    "n": 1691,
+    "height": 0,
+    "floors": 0
+   },
+   "OpenStreetMap": {
+    "n": 9843,
+    "height": 0,
+    "floors": 0
+   }
+  },
+  "footprint_m2": 1500252,
+  "cell_km2": 3.96,
+  "built_cover_pct": 37.9
+ },
+ "Ikeja (Allen/Computer Village)": {
+  "by_source": {
+   "Microsoft ML Buildings": {
+    "n": 142,
+    "height": 0,
+    "floors": 0
+   },
+   "Google Open Buildings": {
+    "n": 6914,
+    "height": 0,
+    "floors": 0
+   },
+   "OpenStreetMap": {
+    "n": 939,
+    "height": 14,
+    "floors": 46
+   }
+  },
+  "footprint_m2": 1411157,
+  "cell_km2": 3.96,
+  "built_cover_pct": 35.6
+ },
+ "Lekki Phase 1": {
+  "by_source": {
+   "Google Open Buildings": {
+    "n": 1579,
+    "height": 0,
+    "floors": 0
+   },
+   "Microsoft ML Buildings": {
+    "n": 136,
+    "height": 0,
+    "floors": 0
+   },
+   "OpenStreetMap": {
+    "n": 3933,
+    "height": 125,
+    "floors": 3
+   }
+  },
+  "footprint_m2": 1021549,
+  "cell_km2": 3.96,
+  "built_cover_pct": 25.8
+ },
+ "Victoria Island": {
+  "by_source": {
+   "Microsoft ML Buildings": {
+    "n": 364,
+    "height": 0,
+    "floors": 0
+   },
+   "Google Open Buildings": {
+    "n": 2957,
+    "height": 0,
+    "floors": 0
+   },
+   "OpenStreetMap": {
+    "n": 980,
+    "height": 236,
+    "floors": 6
+   }
+  },
+  "footprint_m2": 915142,
+  "cell_km2": 3.96,
+  "built_cover_pct": 23.1
+ },
+ "Oshodi": {
+  "by_source": {
+   "Google Open Buildings": {
+    "n": 1567,
+    "height": 0,
+    "floors": 0
+   },
+   "OpenStreetMap": {
+    "n": 7822,
+    "height": 0,
+    "floors": 11
+   },
+   "Microsoft ML Buildings": {
+    "n": 125,
+    "height": 0,
+    "floors": 0
+   }
+  },
+  "footprint_m2": 1482046,
+  "cell_km2": 3.96,
+  "built_cover_pct": 37.4
+ },
+ "Mushin": {
+  "by_source": {
+   "Google Open Buildings": {
+    "n": 1530,
+    "height": 0,
+    "floors": 0
+   },
+   "Microsoft ML Buildings": {
+    "n": 158,
+    "height": 0,
+    "floors": 0
+   },
+   "OpenStreetMap": {
+    "n": 10074,
+    "height": 0,
+    "floors": 0
+   }
+  },
+  "footprint_m2": 1665830,
+  "cell_km2": 3.96,
+  "built_cover_pct": 42.0
+ },
+ "Ajegunle": {
+  "by_source": {
+   "OpenStreetMap": {
+    "n": 11668,
+    "height": 0,
+    "floors": 0
+   },
+   "Google Open Buildings": {
+    "n": 1009,
+    "height": 0,
+    "floors": 0
+   },
+   "Microsoft ML Buildings": {
+    "n": 157,
+    "height": 0,
+    "floors": 0
+   }
+  },
+  "footprint_m2": 1688185,
+  "cell_km2": 3.96,
+  "built_cover_pct": 42.6
+ },
+ "Ikorodu town": {
+  "by_source": {
+   "Microsoft ML Buildings": {
+    "n": 228,
+    "height": 0,
+    "floors": 0
+   },
+   "OpenStreetMap": {
+    "n": 4459,
+    "height": 0,
+    "floors": 4
+   },
+   "Google Open Buildings": {
+    "n": 4842,
+    "height": 0,
+    "floors": 0
+   }
+  },
+  "footprint_m2": 1301776,
+  "cell_km2": 3.96,
+  "built_cover_pct": 32.9
+ },
+ "Eko Atlantic": {
+  "by_source": {
+   "Microsoft ML Buildings": {
+    "n": 40,
+    "height": 0,
+    "floors": 0
+   },
+   "OpenStreetMap": {
+    "n": 45,
+    "height": 7,
+    "floors": 18
+   },
+   "Google Open Buildings": {
+    "n": 198,
+    "height": 0,
+    "floors": 0
+   }
+  },
+  "footprint_m2": 75132,
+  "cell_km2": 3.96,
+  "built_cover_pct": 1.9
+ }
+}
