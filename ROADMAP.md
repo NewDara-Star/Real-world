@@ -83,8 +83,17 @@ physics and the driver. `research/15-what-it-takes.md` is the full map.
   shadow set.
 - Lagos: clamp road widths to the gap between building frontages (road class
   is unreliable there).
+- Rendering and loading: texture arrays instead of the two atlases (plus a
+  second sample to hide tiling); worker meshing with a three-free mesher and
+  tiles streamed by distance; far-LOD tiles for the explorer (research 16 §8,
+  17 item 10). Needed before any big place; Finglas is fine as it is.
+- Explorer polish: shop fascia signs from OSM names; a map toggle that shows
+  open reference images (land use, plan zones) over the world for checking.
 - Process: before/after URL flags for visual changes (removed once decided),
   and headless triangle-count and z-fighting checks.
+- **Owner's decision needed:** Mapillary photos are CC BY-SA (share-alike),
+  which isn't on our licence list, yet item 13 plans to use them. Allow
+  them for facade images, use them only for checking, or drop them.
 
 ## Then
 
