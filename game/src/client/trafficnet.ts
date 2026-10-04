@@ -132,7 +132,7 @@ export class NetTraffic {
   /** Human-looking pedestrians once their models have loaded; until then (or if they can't), simple walkers. */
   private crowd: Crowd | null = null;
   private crowdPeds: CrowdPed[] = [];
-  private rand = mulberry32(Date.now() & 0xffff);
+  private rand: () => number;
   private spawnLanes: Lane[];
   private footLanes: Lane[];
   /** Footpath/crossing lane -> walking area at its start / end (-1 if none). */
@@ -159,7 +159,9 @@ export class NetTraffic {
   /** Which side of the lane a car pulls out to when overtaking (+ left of travel). */
   private overtakeSide: number;
 
-  constructor(readonly net: RoadNet, private ev: TrafficEvents, budget: { vehicles: number; walkers: number }, drive: "left" | "right" = "left") {
+  /** `budget.seed` makes a run repeat exactly (tests); without it every run differs. */
+  constructor(readonly net: RoadNet, private ev: TrafficEvents, budget: { vehicles: number; walkers: number; seed?: number }, drive: "left" | "right" = "left") {
+    this.rand = mulberry32(budget.seed ?? Date.now() & 0xffff);
     // Keep left: overtake on the right, and vice versa.
     this.overtakeSide = drive === "left" ? -1 : 1;
     const mat = createVertexColorMaterial(0.55, 0.15);

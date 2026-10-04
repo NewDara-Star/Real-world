@@ -1,6 +1,6 @@
 import type { Navigator } from "./nav";
 import { mulberry32 } from "./props";
-import { ALLOW_CAR, LaneKind, type Link, type RoadNet } from "./roadnet";
+import { ALLOW_CAR, EDGE_GIVE_WAY, EDGE_STOP, LaneKind, type Link, type RoadNet } from "./roadnet";
 import type { NetTraffic } from "./trafficnet";
 
 // Dev autodrive (?autodrive=happy|sad|idiot|tragedy): the player's own car,
@@ -46,6 +46,7 @@ export interface AutoCommand {
   indicator: number;
   glance: boolean;
   look: number;
+  lookBack: boolean;
 }
 
 export interface Destination {
@@ -89,6 +90,16 @@ export class AutoDriver {
   private p: Profile;
   private rand: () => number;
   private lastPath: number[] | null = null;
+  /** Distance along the route path (m), tracked here. */
+  private s = 0;
+  /** How far along the route the car is (m), by the driver's own tracking. */
+  get along() {
+    return this.s;
+  }
+  /** A three-point turn in progress: phase 1 forward on full lock, 2 back on the other, then away. */
+  private turn: { phase: 1 | 2; yaw0: number; after: number; t: number; legs: number; legT: number } | null = null;
+  /** Which side traffic keeps to (turns in the road start across it). */
+  keepLeft = true;
   private links: { link: Link; s: number }[] = [];
   /** Per-junction decisions (ignore the light? the give-way?), rolled once per approach. */
   private decided = new Map<number, { signal: boolean; giveWay: boolean; stopDone: boolean; mirrored: boolean }>();
@@ -100,7 +111,7 @@ export class AutoDriver {
   private kerbT = 0;
   /** Sad path: driving past a turn on purpose; where it was really going. */
   private detour: { final: Destination } | null = null;
-  private nextDetour = 60;
+  private nextDetour = 30;
   private nextFault = 40;
   private lastX = NaN;
   private lastZ = NaN;
@@ -164,7 +175,7 @@ export class AutoDriver {
     this.lastZ = car.z;
     this.stats.time += dt;
     const v = car.vf;
-    const out: AutoCommand = { steer: 0, throttle: 0, brake: 0, handbrake: false, selector: "D", parkBrake: false, indicator: car.indicator, glance: false, look: 0 };
+    const out: AutoCommand = { steer: 0, throttle: 0, brake: 0, handbrake: false, selector: "D", parkBrake: false, indicator: car.indicator, glance: false, look: 0, lookBack: false };
 
     // ---- where to: a route, or a new one on arrival ----
     if (nav.arrived && this.mode === "sad" && this.parkT === 0 && !this.detour) {
@@ -184,9 +195,8 @@ export class AutoDriver {
       } else return out;
     }
     // The route's last point is the place itself, often off the road: stop at the road's end.
-    const roadEnd = nav.pathCum.length > 1 ? nav.pathCum[nav.pathCum.length - 2] : nav.total;
-    const here0 = nav.progress;
-    if (nav.dest && !nav.arrived && here0 > roadEnd - 8 && Math.abs(v) < 0.5) nav.arrived = true;
+    const roadEndNow = () => (nav.pathCum.length > 1 ? nav.pathCum[nav.pathCum.length - 2] : nav.total);
+    if (nav.dest && !nav.arrived && this.s > roadEndNow() - 8 && Math.abs(v) < 0.5) nav.arrived = true;
     if (nav.arrived && this.detour) {
       // Past the missed turn: back to where it was going.
       const final = this.detour.final;
@@ -224,14 +234,27 @@ export class AutoDriver {
         this.log("rerouted");
       }
       this.lastPath = nav.path;
+      this.s = project(nav.path, nav.pathCum, car.x, car.z, 0, nav.total)?.s ?? 0;
       this.links = [];
       for (const st of nav.steps) if (st.link) this.links.push({ link: st.link, s: nav.pathAt(st.link) });
       this.decided.clear();
     }
-    const s0 = nav.progress;
+    // Where the car is along the route: its own tracking, a little window
+    // ahead of the last spot, so a path that doubles back can't confuse it
+    // (steering at a frozen target once circled the car off the road).
+    // Never past the end of the road: the route's last leg runs off-road to the place itself.
+    const roadEnd = roadEndNow();
+    const near = project(nav.path, nav.pathCum, car.x, car.z, this.s - 3, Math.min(this.s + 25, roadEnd));
+    if (near && near.lat < 8) this.s = Math.max(this.s, near.s);
+    else this.s = project(nav.path, nav.pathCum, car.x, car.z, this.s - 30, Math.min(this.s + 200, roadEnd))?.s ?? this.s;
+    this.s = Math.min(this.s, roadEnd);
+    const s0 = this.s;
 
     // ---- steering: pure pursuit ----
-    const look = Math.max(5, Math.min(22, 4 + Math.abs(v) * 0.6)) * p.look;
+    // Pure pursuit cuts the inside of a bend by about look²/8R: look less far in tight ones.
+    let look = Math.max(4, Math.min(20, 3 + Math.abs(v) * 0.5));
+    if (curvature(nav.path, nav.pathCum, s0 + look / 2) > 0.05) look *= 0.7;
+    look *= p.look;
     const [tx, tz] = pointAt(nav.path, nav.pathCum, Math.min(s0 + look, roadEnd));
     const dx = tx - car.x, dz = tz - car.z;
     const fx = Math.sin(car.yaw), fz = Math.cos(car.yaw);
@@ -241,8 +264,15 @@ export class AutoDriver {
     out.steer = clamp(delta / this.maxSteer, -1, 1);
 
     // ---- speed: every situation caps it; the lowest wins ----
+    // The limit: the lower of the lane the route says it's on and the lane it
+    // looks to be on (where lanes overlap, e.g. a service road beside a street,
+    // a careful driver takes the lower).
     const here = this.net.locate(car.x, car.z, car.yaw, ALLOW_CAR);
-    const limit = Math.max(4, here?.lane.speed ?? 8.3);
+    let step = nav.steps[0];
+    for (const st of nav.steps) if (st.start <= s0) step = st;
+    const routeLane = step ? (step.link ? this.net.lanes[step.link.from] : this.net.carLanes(this.net.edges[step.edge])[0]) : null;
+    const limits = [here?.lane.speed, routeLane?.speed].filter((x): x is number => !!x);
+    const limit = Math.max(2.5, limits.length ? Math.min(...limits) : 8.3);
     let cap = limit * p.limit, why = `limit ${Math.round(limit * 3.6)} km/h`;
     const capTo = (vmax: number, reason: string) => {
       if (vmax < cap) [cap, why] = [vmax, reason];
@@ -303,8 +333,12 @@ export class AutoDriver {
         }
       }
       if (!this.traffic || dist < 0) continue;
-      const minor = link.state === "m" || link.state === "=" || link.state === "s" || link.state === "w";
-      if (link.state === "s" && !dec.stopDone && dec.giveWay) {
+      // Stop and give-way from the road's own signs (the examiner reads the same flags).
+      const fromEdge = this.net.lanes[link.from].edge;
+      const flags = fromEdge >= 0 ? this.net.edges[fromEdge].flags : 0;
+      const stopSign = !!(flags & EDGE_STOP) || link.state === "s";
+      const minor = link.state === "m" || link.state === "=" || link.state === "w" || stopSign || !!(flags & EDGE_GIVE_WAY);
+      if (stopSign && !dec.stopDone && dec.giveWay) {
         stopAt(s, "stop sign");
         if (dist < 3 && Math.abs(v) < 0.2) this.stoppedT += dt;
         if (this.stoppedT > 1) [dec.stopDone, this.stoppedT] = [true, 0];
@@ -322,6 +356,17 @@ export class AutoDriver {
 
     // ---- mode behaviour ----
     const next = this.links.find((l) => l.s - s0 > -2) ?? null;
+    // A dead end the route turns round in: stop there, then a three-point turn
+    // (the careful drivers; the idiot swings round over the kerb).
+    const uturn = !!next && (next.link.dir === "t" || next.link.dir === "T") && p.indicate;
+    if (uturn && next) {
+      stopAt(next.s, "stopping to turn in the road");
+      if (!this.turn && next.s - s0 < 9 && Math.abs(v) < 0.3) {
+        this.turn = { phase: 1, yaw0: car.yaw, after: next.s, t: 0, legs: 1, legT: 0 };
+        this.log("turning in the road (three-point turn)");
+      }
+    }
+    if (this.turn) return this.turnStep(dt, car, out);
     if (this.mode === "sad") this.sadStep(dt, v, next);
     if (this.mode === "idiot") this.idiotStep(dt, out, v);
 
@@ -402,8 +447,8 @@ export class AutoDriver {
   private sadStep(dt: number, v: number, next: { link: Link; s: number } | null) {
     this.nextDetour -= dt;
     if (this.detour || this.nextDetour > 0 || Math.abs(v) < 3 || !next || !this.nav.dest) return;
-    const dist = next.s - this.nav.progress;
-    if (dist > 70 || dist < 20 || !turnOf(next.link)) return;
+    const dist = next.s - this.s;
+    if (dist > 90 || dist < 15 || !turnOf(next.link)) return;
     const from = this.net.lanes[next.link.from];
     const straight = from.out.map((k) => this.net.links[k]).find((L) => L.dir === "s" && this.net.lanes[L.to].kind === LaneKind.Road);
     if (!straight) return;
@@ -415,6 +460,52 @@ export class AutoDriver {
     this.detour = { final };
     this.nextDetour = 120 + this.rand() * 120;
     this.log(`missing the ${turnOf(next.link) < 0 ? "left" : "right"} turn on purpose`);
+  }
+
+  /**
+   * The turn in the road, one leg at a time: forward on full lock across the
+   * road, back on the other lock, repeated until it faces the way out. Each
+   * leg stops before the front (or back) of the car would leave the road.
+   */
+  private turnStep(dt: number, car: AutoCar, out: AutoCommand): AutoCommand {
+    const T = this.turn!;
+    T.t += dt;
+    const across = this.keepLeft ? 1 : -1; // first leg turns across the road
+    const turned = Math.abs(wrap(car.yaw - T.yaw0));
+    const v = car.vf;
+    const fwd = T.phase === 1;
+    // The end of the car that's leading, 2.1 m from the middle.
+    const ex = car.x + Math.sin(car.yaw) * (fwd ? 2.1 : -2.1), ez = car.z + Math.cos(car.yaw) * (fwd ? 2.1 : -2.1);
+    const on = this.net.locate(ex, ez, null, ALLOW_CAR);
+    const edgeOfRoad = !on || Math.abs(on.lat) > on.lane.width / 2 - 0.1;
+    out.indicator = 0;
+    out.steer = fwd ? across : -across;
+    out.selector = fwd ? "D" : "R";
+    out.look = fwd ? across : 0; // look both ways before pulling across
+    out.lookBack = !fwd;
+    this.status = `turning in the road: ${fwd ? "forward on full lock" : "reversing on the other lock"} (leg ${T.legs})`;
+    const done = turned > 2.75;
+    if (edgeOfRoad || done || T.legT > 6) {
+      out.brake = 0.8;
+      if (Math.abs(v) < 0.1) {
+        if (done) {
+          this.turn = null;
+          // Past the turnaround: track from the way out.
+          this.s = Math.max(T.after + 3, project(this.nav.path, this.nav.pathCum, car.x, car.z, T.after, T.after + 60)?.s ?? 0);
+          this.log(`turned round in ${T.legs} legs`);
+          out.selector = "D";
+        } else Object.assign(T, { phase: fwd ? 2 : 1, legs: T.legs + 1, legT: 0 });
+      }
+    } else {
+      T.legT += dt;
+      out.throttle = Math.abs(v) < 1 ? 0.16 : 0;
+    }
+    if (T.t > 60 || T.legs > 7) {
+      this.turn = null; // give up rather than shuffle forever
+      this.s = T.after + 3;
+      this.log("couldn't turn round; going on as it is");
+    }
+    return out;
   }
 
   /** Idiot path: weave onto the kerb now and then, and once in a while select R at speed. */
@@ -444,7 +535,7 @@ export class AutoDriver {
       z: Math.round(car.z * 10) / 10,
       kmh: Math.round(car.vf * 3.6),
       destination: this.nav.dest?.name ?? null,
-      toGo: Math.round(Math.max(0, this.nav.total - this.nav.progress)),
+      toGo: Math.round(Math.max(0, this.nav.total - this.s)),
       stats: { ...this.stats, time: Math.round(this.stats.time), distance: Math.round(this.stats.distance) },
       events: this.events.slice(-8),
     };
@@ -496,3 +587,4 @@ export function project(pts: number[], cum: number[], x: number, z: number, s0: 
 }
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
+const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));

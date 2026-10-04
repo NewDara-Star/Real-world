@@ -115,7 +115,10 @@ export class Navigator {
       }
     }
     if (startEdge < 0) startEdge = this.nearestEdge(x, z);
-    const goal = this.nearestEdge(dest.x, dest.z);
+    // Either side of the street will do: aiming for one direction only sent
+    // routes to the end of a cul-de-sac to turn round (onto the kerb).
+    const goals = this.nearestEdges(dest.x, dest.z, 4);
+    let goal = goals.size ? goals.values().next().value! : -1;
     if (startEdge < 0 || goal < 0) return false;
 
     // A* over edges, cost in seconds.
@@ -124,7 +127,7 @@ export class Navigator {
     const prev = new Int32Array(n).fill(-1);
     const prevLink: (Link | null)[] = new Array(n).fill(null);
     const open: [number, number][] = [];
-    const gx = net.junctions[net.edges[goal].to]?.x ?? dest.x, gz = net.junctions[net.edges[goal].to]?.z ?? dest.z;
+    const gx = dest.x, gz = dest.z;
     const h = (e: number) => {
       const j = net.junctions[net.edges[e].to];
       return j ? Math.hypot(j.x - gx, j.z - gz) / 30 : 0;
@@ -136,7 +139,10 @@ export class Navigator {
       const [, e] = pop(open);
       if (closed[e]) continue;
       closed[e] = 1;
-      if (e === goal) break;
+      if (goals.has(e)) {
+        goal = e;
+        break;
+      }
       for (const s of this.succ.get(e) ?? []) {
         const c = g[e] + s.cost + this.edgeLen[s.edge] / this.edgeSpeed[s.edge];
         if (c < g[s.edge]) {
@@ -166,6 +172,20 @@ export class Navigator {
     return true;
   }
 
+  /** Edges whose car lanes come within `slack` m of the nearest one to (x, z), nearest first. */
+  private nearestEdges(x: number, z: number, slack: number): Set<number> {
+    const d = new Map<number, number>();
+    for (const l of this.net.lanes) {
+      if (l.kind !== LaneKind.Road || !(l.allow & ALLOW_CAR) || l.edge < 0) continue;
+      for (let k = 0; k + 3 < l.pts.length; k += 2) {
+        const v = segDist(x, z, l.pts[k], l.pts[k + 1], l.pts[k + 2], l.pts[k + 3]) + (l.allow & ALLOW_SERVICE ? 15 : 0);
+        if (v < (d.get(l.edge) ?? Infinity)) d.set(l.edge, v);
+      }
+    }
+    const best = Math.min(...d.values());
+    return new Set([...d].filter(([, v]) => v <= best + slack).sort((a, b) => a[1] - b[1]).map(([e]) => e));
+  }
+
   private nearestEdge(x: number, z: number): number {
     let best = -1, bd = Infinity;
     for (const l of this.net.lanes) {
@@ -185,9 +205,17 @@ export class Navigator {
   private buildPath(startS: number) {
     const net = this.net;
     const pts: number[] = [];
+    const at = { x: 0, z: 0, dx: 0, dz: 0 };
     const add = (l: Lane, from = 0) => {
+      // Start exactly where the car is: a straight lane has points only at its
+      // ends, and skipping to the next one started the route up to a lane's
+      // length ahead (the car looked off-route and it rerouted every 1.5 s).
+      if (from > 0) {
+        net.at(l, from, at);
+        pts.push(at.x, at.z);
+      }
       for (let k = 0; k < l.pts.length; k += 2) {
-        if (l.cum[k / 2] < from) continue;
+        if (from > 0 && l.cum[k / 2] <= from) continue;
         pts.push(l.pts[k], l.pts[k + 1]);
       }
     };
@@ -245,14 +273,13 @@ export class Navigator {
     return best;
   }
 
-  /** Track the car along the route; reroute when it strays. Returns the next instruction. */
-  update(dt: number, x: number, z: number, yaw: number): Instruction | null {
-    if (!this.dest || !this.path.length) return null;
-    // Project onto the route near the current progress.
+  /** Nearest point on the route between distances s0 and s1: [distance along, how far off]. */
+  private nearest(x: number, z: number, s0: number, s1: number): [number, number] {
     let best = this.progress, bd = Infinity;
     for (let k = 0; k + 3 < this.path.length; k += 2) {
-      const c0 = this.pathCum[k / 2];
-      if (c0 < this.progress - 60 || c0 > this.progress + 200) continue;
+      // A segment counts if any of it is in the window (a straight road can be one 100 m+ segment).
+      const c0 = this.pathCum[k / 2], c1 = this.pathCum[k / 2 + 1];
+      if (c1 < s0 || c0 > s1) continue;
       const ax = this.path[k], az = this.path[k + 1], bx = this.path[k + 2], bz = this.path[k + 3];
       const dx = bx - ax, dz = bz - az, len2 = dx * dx + dz * dz || 1;
       const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / len2));
@@ -262,6 +289,17 @@ export class Navigator {
         best = c0 + Math.sqrt(len2) * t;
       }
     }
+    return [best, bd];
+  }
+
+  /** Track the car along the route; reroute when it strays. Returns the next instruction. */
+  update(dt: number, x: number, z: number, yaw: number): Instruction | null {
+    if (!this.dest || !this.path.length) return null;
+    // Project onto the route near the current progress: a short window first,
+    // so a route that comes back past itself (round a block) can't make the
+    // progress jump ahead; wider only when the car isn't near it.
+    let [best, bd] = this.nearest(x, z, this.progress - 20, this.progress + 40);
+    if (bd > 6) [best, bd] = this.nearest(x, z, this.progress - 60, this.progress + 200);
     this.progress = Math.max(this.progress, best);
     this.offRouteT = bd > 18 ? this.offRouteT + dt : 0;
     if (this.offRouteT > 1.5 && this.dest) {

@@ -13,7 +13,11 @@ slot into the order below:
   screenshot mode in the desktop app, see `game/README.md`). Headless on
   Finglas: happy drives with no examiner faults, idiot gets caught, sad
   reroutes after missed turns. It found: the examiner marked speeding once
-  per km/h (fixed), judged some junctions on the wrong curve (fixed), and
+  per km/h (fixed), judged some junctions on the wrong curve (fixed); the
+  sat-nav started routes up to a lane's length ahead (constant "Rerouting"),
+  lost its place on long straight segments and on routes that pass back by
+  themselves, and sent routes into cul-de-sacs to turn round (all fixed);
+  traffic couldn't be seeded (fixed); and
   **3 of Finglas's 83 signals run 6-7 minute cycles** (SUMO's
   `--tls.join` merged clusters, 11 phase groups): fix in `build_net.sh`
   (smaller join distance or capped cycle), still open. Also open: the fps

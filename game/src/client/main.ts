@@ -834,6 +834,7 @@ async function startAutodrive(mode: AutoMode) {
   const places = world.meta.places.map((p) => ({ x: p.x, z: p.z, name: p.name }));
   autoDriver = new AutoDriver(world.net, navigator_, traffic instanceof NetTraffic ? traffic : null, mode, places, world.meta.half, car.spec.physics.maxSteer, Number(params.get("seed")) || 1);
   autoDriver.setDestination = (d) => setDestination(d);
+  autoDriver.keepLeft = CITY.drive === "left";
   document.body.append(autoLabel);
   const ad = autoDriver;
   Object.assign(window, {
@@ -859,7 +860,7 @@ function driveFrame(dt: number, now: number) {
   if (autoDriver) {
     // Dev autodrive: the robot has the controls (keys still work for camera, map, pause).
     const a = autoDriver.step(dt, { x: c.x, z: c.z, yaw: c.yaw, vf: c.vf, indicator: c.indicator });
-    Object.assign(inp, { steer: a.steer, throttle: a.throttle, brake: a.brake, handbrake: a.handbrake, glance: a.glance, look: a.look, device: "auto", shift: 0, keyboardSteering: false });
+    Object.assign(inp, { steer: a.steer, throttle: a.throttle, brake: a.brake, handbrake: a.handbrake, glance: a.glance, look: a.look, lookBack: a.lookBack, device: "auto", shift: 0, keyboardSteering: false });
     c.selector = a.selector;
     c.parkBrake = a.parkBrake;
     // The indicator stalk toggles: press the side wanted, or the lit side to cancel.
