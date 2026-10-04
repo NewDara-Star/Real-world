@@ -1,4 +1,4 @@
-# Real World: driving simulator in real places
+# World Drive: driving simulator in real places
 
 A desktop driving simulator (three.js r186 WebGPU in Electron) set in real
 places rebuilt from open map data. The first place is Finglas, Dublin, where the
@@ -20,6 +20,10 @@ the map of every system. Research notes live in `research/`.
   View imagery. Never copy code from other sites; techniques only. 3D models
   come from the owner's local Claude in Blender (`docs/blender-assets.md`); no
   AI-generated meshes.
+- Reference photos (Geograph, Wikimedia, Panoramax, the owner's own) are for
+  looking at while modelling; never stored (`reference/` keeps previews only)
+  and never textures. Models carry no logos, shop names, real house numbers
+  or plates, even for chains like Lidl or Tesco.
 - Never put personal data (the owner's email, name) in code, commits or request
   headers. Keys live in environment variables (e.g. `MAPILLARY_TOKEN`); never
   ask for them in chat and never print them.

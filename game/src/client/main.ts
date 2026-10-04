@@ -33,7 +33,7 @@ const params = new URLSearchParams(location.search);
 const DEBUG = params.has("debug");
 const CITY = await resolveCity(params.get("city"));
 /** Desktop app (or ?solo=1): single player, no server, no chat. */
-const SOLO = params.has("solo") || "ekoDesktop" in window;
+const SOLO = params.has("solo") || "worldDriveDesktop" in window;
 const ZONE = CITY.zone;
 styleUniform.value = CITY.style === "dublin" ? 1 : 0;
 const WALK = 2.6;
@@ -231,7 +231,7 @@ const NAMES = ["Tunde", "Ada", "Chioma", "Seyi", "Kemi", "Emeka", "Bola", "Ngozi
 $<HTMLInputElement>("name").value = NAMES[Math.floor(Math.random() * NAMES.length)];
 if (SOLO) {
   // Single-player app: no name or vibe to ask for, just drive.
-  document.querySelector(".join-box h1")!.textContent = "Eko Drive";
+  document.querySelector(".join-box h1")!.textContent = "World Drive";
   $("joinnote").textContent = "";
   document.querySelector(".tag")!.textContent = `Real streets of ${CITY.label}. Plug in your wheel and drive.`;
   for (const el of document.querySelectorAll<HTMLElement>(".join-box label")) el.style.display = "none";
@@ -399,10 +399,10 @@ $("invite").addEventListener("click", async () => {
     return;
   }
   const url = `${location.origin}/?meet=${net.id}&layer=${net.layer}`;
-  const text = `I dey ${$("where").textContent?.replace("📍 ", "") || CITY.label} for Eko World. Come find me 👇🏾`;
+  const text = `I dey ${$("where").textContent?.replace("📍 ", "") || CITY.label} for World Drive. Come find me 👇🏾`;
   try {
     if (navigator.share) {
-      await navigator.share({ title: "Eko World", text, url });
+      await navigator.share({ title: "World Drive", text, url });
       return;
     }
   } catch {

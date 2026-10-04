@@ -1,5 +1,5 @@
 {
-  "name": "eko-world",
+  "name": "world-drive",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -13,7 +13,7 @@
     "deploy": "vite build && wrangler deploy",
     "bake": "python3 ../tools/bake/bake_world.py",
     "desktop": "vite build && electron .",
-    "package:mac": "vite build && electron-packager . \"Eko Drive\" --platform=darwin --arch=arm64 --out=release --overwrite --prune=true --ignore=\"^/(src|public|tools|research|release|node_modules|\\.wrangler)($|/)\""
+    "package:mac": "vite build && electron-packager . \"World Drive\" --platform=darwin --arch=arm64 --out=release --overwrite --prune=true --ignore=\"^/(src|public|tools|research|release|node_modules|\\.wrangler)($|/)\""
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.21.0",

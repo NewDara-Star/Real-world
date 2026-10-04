@@ -17,9 +17,9 @@ slot into the order below:
   `wheel.ts` takes steer and pedals from the wheel only, so its idle pedals
   zero the keyboard; nothing on screen says so ("nothing behind their back").
   Show it, or let the keyboard drive while the wheel's pedals are idle.
-- **Name:** the window title still says "Eko World — walk real Lagos" in
-  Finglas (and the Electron window is "Eko Drive"). The owner wants one name
-  of our own, e.g. "World Drive". Owner's decision; then change it everywhere.
+- **Name:** done. The owner chose "World Drive"; title, window, package and
+  README use it. (Saved settings keep their `eko-` keys so nobody loses them;
+  the deployed worker keeps its name.)
 - **House numbers:** map search finds streets only. The bake keeps no
   addresses at all (no OSM `addr:*`, no Overture addresses theme), so a home
   address can't be found. Import whichever has Finglas coverage (check both;
@@ -32,9 +32,9 @@ slot into the order below:
   furniture is correct in size and names but plain. Next pass uses reference
   photos per asset. Buildings are boxes with one repeated window and trees are
   low-poly blobs (house kits §6 and trees §5 in `docs/blender-assets.md`).
-- **Owner's decision needed:** reference photos from Geograph (CC BY-SA) and
-  Wikimedia Commons (per-file licences). Proposal: use them only as modelling
-  reference, never as textures or in the repo, like the Mapillary question.
+- **Reference photos:** decided. Look at them to model, never store them
+  (`.gitignore` refuses anything in `reference/` but previews), no logos or
+  identifying features even for chains like Lidl or Tesco.
 
 ## Now
 

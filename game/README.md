@@ -1,60 +1,67 @@
-# Eko World (working title): Yaba test build
+# World Drive
 
-A walkable, multiplayer slice of real Yaba, Lagos, in the browser. No download, no sign-up.
+A driving simulator set in real places rebuilt from open map data: a driving
+school for the Irish test (Finglas, Dublin) plus a world explorer (Yaba, Lagos,
+and more places as they're baked). three.js r186 (WebGPU, WebGL2 fallback) in
+Electron or the browser. See `../CLAUDE.md` for how the project works and
+`../ROADMAP.md` for the running order.
 
-- **World:** 14,082 real buildings, 1,402 road/rail segments and 152 street names from Overture Maps / OpenStreetMap / Google Open Buildings, baked into a 283 KB (gzipped) file.
-- **Multiplayer:** one Cloudflare Durable Object per zone layer (`yaba-1`, `yaba-2`, …, 120 players each). Movement is relayed only to players within 120 m, batched every 100 ms. Chat reaches players within 30 m.
-- **Join by link:** "Invite padi" makes a link that spawns your friend right next to you.
-- **Safety:** server-side filter blocks phone numbers, bank details, links and off-platform lures; chat cooldown.
-- **Low-end first:** unlit vertex-coloured chunks, about 15–20 draw calls, fog-limited draw distance, automatic resolution scaling.
+- **World:** buildings, roads and places from Overture Maps and OpenStreetMap;
+  the road network (lanes, roundabouts, signals, crossings) built with SUMO.
+- **Driving:** a rigid-body car (Rapier) with Pacejka tyres and an automatic
+  gearbox, force feedback on a Logitech G29/G923, cockpit with mirrors.
+- **Traffic and people:** rule-following AI cars, human pedestrians, and an
+  examiner marking RSA-style faults.
 
-## Driving (car or danfo)
+## Controls
 
-Tap **🚗 Drive** or **🚐 Danfo** (or press **F**) near a road. Chase and cockpit cameras (**C**).
+Wheel, pad and keyboard are all supported; the full list is in the pause menu
+(Esc, or Options on the wheel). Keyboard basics: W gas, S brake (Shift+S for an
+emergency stop), A/D steer, X/Z move the gear selector toward D/P (foot on the
+brake to leave P), B parking brake, C camera, F get in or out, M map.
 
-- **Logitech G29 / G923 (PlayStation) in Chrome or Edge:** click **🎮 Connect wheel** and pick the wheel. No calibration: the game talks to the wheel directly over WebHID using the known G29 protocol (from the Linux `hid-lg4ff` driver and the CC0 `logitech-g29` library), sets 900° rotation, and drives **force feedback** (speed-sensitive centring, crash jolts, road buzz) and the **rev-light LEDs**. ✕ handbrake · □ horn · △ camera · ○ get out. Even without connecting, a G29 works through the normal gamepad path with a built-in default mapping (no force feedback).
-- **Other wheels:** **🎮 Set up wheel** appears only for wheels the game can't map itself, with a short guided setup.
-- **PS5 / Xbox controller:** works without setup. Left stick steers, R2 gas, L2 brake, Cross/A handbrake, Square/X horn, Triangle/Y camera, Circle/B get out.
-- **Keyboard:** W/S gas and brake (hold S when stopped to reverse), A/D steer, Space handbrake, H horn, C camera, F get out.
-- **Phone:** left thumb up = gas, down = brake, sideways = steer.
+**G29/G923:** click **🎮 Connect wheel** (Chrome, Edge or the desktop app). The
+game drives the wheel directly over WebHID: rotation set to the car's steering,
+force feedback from the tyres, rev lights. Wheel check (top right) shows what
+the game reads and holds the force feedback settings.
 
-Other players see your car or danfo. Traffic stops (and honks) when you block it; walls and other vehicles stop you.
-
-## Run locally
+## Run it
 
 ```sh
 cd game
 npm install
-npm run build          # typecheck + bundle into dist/
-npx wrangler dev       # serves dist/ and the multiplayer server on http://127.0.0.1:8787
+npm run desktop        # build and open the desktop app
+# or, in a browser:
+npm run build && npx wrangler dev   # http://127.0.0.1:8787
 ```
 
-Open `http://127.0.0.1:8787/` in two browser windows. Add `?debug=1` for FPS, draw calls and network use.
+URL options: `?city=finglas`, `?time=13` (hour of day), `?debug=1` (frame
+rate, draw calls, and the `__car`, `__traffic`, `__me` handles).
 
-Load test: `node tools/bots.mjs 150 30` (150 bots for 30 seconds against the local server).
-
-## Rebuild the map
+## Checks
 
 ```sh
-python3 ../tools/bake/bake_world.py --name yaba --bbox 3.362 6.494 3.384 6.520
+npm run check          # typecheck + every test in tests/ (about 25 s)
+npm test physics       # one test file
 ```
 
-Needs `duckdb`, `shapely`, `numpy`, `rasterio` and the Overture extracts in `research/data/`.
+Commits and pushes go through the repo's git hooks (credits, privacy, a
+`Story:` paragraph, the checks, and a second-Claude review); see `../CLAUDE.md`.
 
-## Deploy (Cloudflare free plan)
-
-Needs `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` in the environment.
+## Add a place
 
 ```sh
-npm run deploy
+python3 ../tools/bake/add_place.py finglas            # rebuild a place
+python3 ../tools/bake/add_place.py --help             # add a new one
 ```
 
 ## Layout
 
 ```
-src/shared/   protocol (binary movement + JSON messages), chat moderation
-src/server/   Worker entry + Zone Durable Object
-src/client/   three.js client: world builder, avatars, input, networking, UI
-public/world/ baked map tiles
+src/client/   the game (see ../CLAUDE.md "Layout")
+src/server/   Worker entry + Zone Durable Object (multiplayer)
+src/shared/   protocol and chat moderation
+public/       baked worlds, textures, models (each folder has CREDITS.md)
+tests/        headless pass/fail tests
 tools/        load-test bots
 ```

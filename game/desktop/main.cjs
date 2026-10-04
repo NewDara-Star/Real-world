@@ -26,7 +26,7 @@ function createWindow() {
     width: 1600,
     height: 950,
     backgroundColor: "#1d1a16",
-    title: "Eko Drive",
+    title: "World Drive",
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -35,8 +35,9 @@ function createWindow() {
       backgroundThrottling: false,
     },
   });
-  // Opens on the world map; EKO_CITY=finglas jumps straight into a place.
-  const city = process.env.EKO_CITY;
+  // Opens on the world map; WORLD_CITY=finglas jumps straight into a place
+  // (EKO_CITY, the old name, still works).
+  const city = process.env.WORLD_CITY ?? process.env.EKO_CITY;
   win.loadURL(city ? `app://game/index.html?solo=1&city=${encodeURIComponent(city)}` : "app://game/globe.html?solo=1");
   win.webContents.on("before-input-event", (event, input) => {
     if (input.type === "keyDown" && (input.key === "F11" || (input.meta && input.control && input.key.toLowerCase() === "f"))) {

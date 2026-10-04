@@ -6,3 +6,10 @@ research/data/finglas/
 
 # API tokens
 .mapillary-token
+
+# Reference photos are looked at while modelling, never stored (owner's rule).
+# Only the README and each asset's own preview render are committed.
+reference/**
+!reference/*/
+!reference/README.md
+!reference/*/preview.png

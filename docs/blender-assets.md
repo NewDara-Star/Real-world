@@ -2,8 +2,9 @@
 
 How to use this: open Claude Code on the Mac in the repo folder, with BlenderMCP
 connected. Paste the **prompt** below, then work through the asset list one at a
-time. Put reference photos in `reference/<asset-id>/` (your own photos or ones
-you're allowed to use; never Google Street View). Finished files go in
+time. Look at reference photos while you model (your own, or Geograph,
+Wikimedia Commons, Panoramax; never Google), but don't keep them: `reference/`
+only commits each asset's `preview.png`. Finished files go in
 `game/public/models/` under the exact names below, then get committed and pushed.
 
 ## Prompt to paste
@@ -11,8 +12,8 @@ you're allowed to use; never Google Street View). Finished files go in
 > You're building game-ready 3D assets in Blender (via BlenderMCP) for a
 > realistic driving simulator set in Finglas, Dublin. Read
 > `docs/blender-assets.md` in this repo and build the asset I name, following
-> its spec and the global rules exactly. Use reference photos in
-> `reference/<asset-id>/` if present. Model real-world dimensions in metres.
+> its spec and the global rules exactly. Look at reference photos for what it
+> looks like (don't save them in the repo). Model real-world dimensions in metres.
 > Use PBR materials (Principled BSDF: base colour, roughness, metallic, normal).
 > Prefer CC0 textures from Poly Haven (BlenderMCP can fetch them); otherwise
 > paint or procedurally bake textures into images. No brand logos, badges,
@@ -37,9 +38,14 @@ you're allowed to use; never Google Street View). Finished files go in
   texture's source, author and licence. A commit changing code needs a
   `Story:` paragraph, and pushes are reviewed by a second Claude
   (see `CLAUDE.md`, "Checks and hooks").
-- **Reference photos:** your own photos first. Open photo sites (Geograph
-  Ireland, Wikimedia Commons, Panoramax) may be looked at for reference only,
-  never traced or used as textures. Never Google Maps, Street View or Earth.
+- **Reference photos (owner's decision, 2026-10-04):** your own photos first.
+  Open photo sites (Geograph Ireland, Wikimedia Commons, Panoramax) may be
+  looked at to make the model, never stored, traced or used as textures. Never
+  Google Maps, Street View or Earth.
+- **Nothing that identifies a place or person.** Model what a building looks
+  like (shape, materials, windows, shopfront layout), not who it is: no logos
+  or shop names even for chains (Lidl, Aldi, Spar, Tesco), no real house
+  numbers, plates or people.
 
 - **Units and axes:** metres. glTF export with +Y up (Blender's default
   exporter converts Z-up for you). The model's front faces **+Z** in glTF

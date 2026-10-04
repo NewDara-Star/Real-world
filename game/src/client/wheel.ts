@@ -75,6 +75,8 @@ export interface WheelCalibration {
   handbrake: number;
 }
 
+// Saved-settings keys keep the app's old name ("eko-"): renaming them would
+// throw away players' saved wheel calibration and settings.
 const STORE = "eko-wheel-cal";
 
 /** Logitech PlayStation-family wheels the game knows without calibration. */
