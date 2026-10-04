@@ -6,6 +6,8 @@ export class StreetAudio {
   private ctx: AudioContext | null = null;
   private master!: GainNode;
   private bed!: GainNode;
+  private noise!: AudioBuffer;
+  private engine: { oscs: OscillatorNode[]; gain: GainNode; filter: BiquadFilterNode; skid: GainNode } | null = null;
   muted = false;
 
   /** Must be called from a user gesture (browsers block autoplay). */
@@ -27,6 +29,7 @@ export class StreetAudio {
       last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02;
       d[i] = last * 3.5;
     }
+    this.noise = noise;
     const src = ctx.createBufferSource();
     src.buffer = noise;
     src.loop = true;
@@ -51,6 +54,80 @@ export class StreetAudio {
     murmur.connect(bp).connect(mg).connect(this.master);
     src.start();
     murmur.start();
+  }
+
+  /** Engine note while driving: rpm 0..1, throttle 0..1, slip 0..1 (tyre squeal). */
+  drive(on: boolean, kind: "car" | "danfo", rpm: number, throttle: number, slip: number, speed: number) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    if (!on) {
+      if (this.engine) {
+        const e = this.engine;
+        e.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.1);
+        e.skid.gain.setTargetAtTime(0, ctx.currentTime, 0.05);
+        setTimeout(() => e.oscs.forEach((o) => o.stop()), 400);
+        this.engine = null;
+      }
+      return;
+    }
+    if (!this.engine) {
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      const filter = ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.value = 600;
+      filter.connect(gain).connect(this.master);
+      const oscs = [0, 1].map((i) => {
+        const o = ctx.createOscillator();
+        o.type = i ? "square" : "sawtooth";
+        o.connect(filter);
+        o.start();
+        return o;
+      });
+      // Tyre squeal: band-passed noise.
+      const skidSrc = ctx.createBufferSource();
+      skidSrc.buffer = this.noise;
+      skidSrc.loop = true;
+      skidSrc.playbackRate.value = 3.2;
+      const bp = ctx.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.frequency.value = 1800;
+      bp.Q.value = 4;
+      const skid = ctx.createGain();
+      skid.gain.value = 0;
+      skidSrc.connect(bp).connect(skid).connect(this.master);
+      skidSrc.start();
+      oscs.push(skidSrc as unknown as OscillatorNode);
+      this.engine = { oscs, gain, filter, skid };
+    }
+    const e = this.engine;
+    const t = ctx.currentTime;
+    // Diesel danfo idles low and rough; the car revs higher and smoother.
+    const base = kind === "danfo" ? 32 : 46;
+    const span = kind === "danfo" ? 95 : 170;
+    const f = base + rpm * span;
+    e.oscs[0].frequency.setTargetAtTime(f, t, 0.04);
+    e.oscs[1].frequency.setTargetAtTime(f * (kind === "danfo" ? 0.5 : 1.003), t, 0.04);
+    e.filter.frequency.setTargetAtTime(380 + rpm * 900 + throttle * 500, t, 0.05);
+    e.gain.gain.setTargetAtTime(0.05 + throttle * 0.07 + rpm * 0.03, t, 0.06);
+    e.skid.gain.setTargetAtTime(Math.min(0.12, slip * Math.min(1, speed / 10) * 0.14), t, 0.05);
+  }
+
+  /** Short low thump for collisions; strength 0..1. */
+  crash(strength: number) {
+    const ctx = this.ctx;
+    if (!ctx || this.muted || strength < 0.05) return;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise;
+    const lp = ctx.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = 300 + strength * 900;
+    const g = ctx.createGain();
+    const t = ctx.currentTime;
+    g.gain.setValueAtTime(Math.min(0.9, 0.25 + strength), t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.35 + strength * 0.3);
+    src.connect(lp).connect(g).connect(this.master);
+    src.start(t, Math.random() * 2, 0.7);
   }
 
   setMuted(m: boolean) {

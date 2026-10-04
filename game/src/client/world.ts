@@ -258,6 +258,37 @@ export class World {
     return spot ?? this.openSpotNear(x, z);
   }
 
+  /**
+   * Nearest drivable lane to (x, z): a point on the right-hand side of a road
+   * (classes up to residential) and the heading of travel along it.
+   */
+  roadSpot(x: number, z: number): { x: number; z: number; yaw: number } | null {
+    let best = 120 * 120;
+    let out: { x: number; z: number; yaw: number } | null = null;
+    const cx = Math.floor(x / GRID), cz = Math.floor(z / GRID);
+    for (let i = -6; i <= 6; i++) {
+      for (let j = -6; j <= 6; j++) {
+        for (const s of this.roadGrid.get(key(cx + i, cz + j)) ?? []) {
+          if (s.cls > 6) continue;
+          const dx = s.bx - s.ax, dz = s.bz - s.az;
+          const len = Math.hypot(dx, dz);
+          if (len < 4) continue;
+          const t = clamp(((x - s.ax) * dx + (z - s.az) * dz) / (len * len), 0.1, 0.9);
+          const px = s.ax + dx * t, pz = s.az + dz * t;
+          const d2 = (px - x) ** 2 + (pz - z) ** 2;
+          if (d2 >= best) continue;
+          // Drive on the right: offset to the right of travel (right = (-dz, dx)).
+          const off = Math.max(1.4, s.w / 4);
+          const lx = px - (dz / len) * off, lz = pz + (dx / len) * off;
+          if (!this.inBounds(lx, lz) || this.insideBuilding(lx, lz)) continue;
+          best = d2;
+          out = { x: lx, z: lz, yaw: Math.atan2(dx, dz) };
+        }
+      }
+    }
+    return out;
+  }
+
   /** Nearest open spot to (x, z), searching outward in rings. */
   openSpotNear(x: number, z: number): { x: number; z: number } {
     for (let r = 0; r < 60; r += 2) {

@@ -5,7 +5,11 @@ import { Input } from "./input";
 import { Net } from "./net";
 import { Traffic } from "./traffic";
 import { World, type Place } from "./world";
-import { FLAG_MOVING, FLAG_RUNNING, type MoveState, type PlayerInfo } from "../shared/protocol";
+import { FLAG_DANFO, FLAG_DRIVING, FLAG_MOVING, FLAG_RUNNING, type MoveState, type PlayerInfo } from "../shared/protocol";
+import { PlayerVehicle, type VehicleKind } from "./drive";
+import { templateGeometry } from "./props";
+import { carTemplate, danfoTemplate } from "./traffic";
+import { DriveControls, runCalibration } from "./wheel";
 
 // ---------------------------------------------------------------- setup ----
 
@@ -79,12 +83,31 @@ interface Remote {
   label: HTMLElement;
   bubble: Bubble | null;
   shown: boolean;
+  /** Car or danfo mesh while this player is driving. */
+  vehicle: THREE.Mesh | null;
+  vehicleKind: VehicleKind | null;
 }
 interface Bubble {
   el: HTMLElement;
   until: number;
 }
 const remotes = new Map<number, Remote>();
+const VEHICLE_MAT = new THREE.MeshBasicMaterial({ vertexColors: true, fog: true });
+const DANFO_GEO = templateGeometry(danfoTemplate());
+const carGeos = new Map<number, THREE.BufferGeometry>();
+function remoteCarGeo(color: number) {
+  let g = carGeos.get(color);
+  if (!g) carGeos.set(color, (g = templateGeometry(carTemplate(color))));
+  return g;
+}
+
+// Driving state.
+const drive = new DriveControls();
+let car: PlayerVehicle | null = null;
+let cockpit = false;
+let hornCooldown = 0;
+let crashCooldown = 0;
+let lookOffset = 0;
 if (DEBUG) Object.assign(window, { __me: me, __remotes: remotes, __world: world });
 let online = 1;
 let meetId = Number(params.get("meet")) || 0;
@@ -193,6 +216,7 @@ enterBtn.addEventListener("click", () => {
   audio.start();
   $("join").hidden = true;
   $("hud").hidden = false;
+  $("drivebar").hidden = false;
   $("chat").hidden = false;
   $("debug").hidden = !DEBUG;
   net.connect({ zone: ZONE, layer: Number(params.get("layer")) || 1, name: me.name, bio: me.bio, pos: () => me.pos });
@@ -304,13 +328,14 @@ function addRemote(p: PlayerInfo) {
   label.textContent = p.name;
   label.style.display = "none";
   $("labels").appendChild(label);
-  const r: Remote = { info: p, avatar, samples: [{ t: performance.now(), x: p.x, z: p.z, yaw: p.yaw, flags: p.flags }], x: p.x, z: p.z, speed: 0, label, bubble: null, shown: false };
+  const r: Remote = { info: p, avatar, samples: [{ t: performance.now(), x: p.x, z: p.z, yaw: p.yaw, flags: p.flags }], x: p.x, z: p.z, speed: 0, label, bubble: null, shown: false, vehicle: null, vehicleKind: null };
   label.addEventListener("click", () => openCard(r));
   remotes.set(p.id, r);
 }
 
 function removeRemote(r: Remote) {
   scene.remove(r.avatar.root);
+  if (r.vehicle) scene.remove(r.vehicle);
   r.label.remove();
   r.bubble?.el.remove();
   remotes.delete(r.info.id);
@@ -339,6 +364,21 @@ function updateRemote(r: Remote, now: number, dt: number) {
   r.avatar.root.position.z = z;
   r.avatar.root.rotation.y = lerpAngle(r.avatar.root.rotation.y, yaw, Math.min(1, dt * 12));
   r.avatar.animate(dt, r.speed);
+  // Swap the walking avatar for a car or danfo while they drive.
+  const flags = s[s.length - 1].flags;
+  const kind: VehicleKind | null = flags & FLAG_DRIVING ? (flags & FLAG_DANFO ? "danfo" : "car") : null;
+  if (kind !== r.vehicleKind) {
+    if (r.vehicle) scene.remove(r.vehicle);
+    r.vehicle = kind ? new THREE.Mesh(kind === "danfo" ? DANFO_GEO : remoteCarGeo(r.info.color), VEHICLE_MAT) : null;
+    if (r.vehicle) scene.add(r.vehicle);
+    r.vehicleKind = kind;
+  }
+  if (r.vehicle) {
+    r.vehicle.position.set(x, 0, z);
+    r.vehicle.rotation.y = r.avatar.root.rotation.y;
+    r.vehicle.visible = r.shown;
+    r.avatar.root.visible = false;
+  }
 }
 
 // --------------------------------------------------------------- labels ----
@@ -423,7 +463,9 @@ function frame(now: number) {
   last = now;
   if (!world.meta) return;
 
-  if (me.avatar) {
+  if (car) {
+    driveFrame(dt, now);
+  } else if (me.avatar) {
     input.update();
     me.camYaw += input.takeYawDelta();
     const { x, y } = input.move;
@@ -464,6 +506,8 @@ function frame(now: number) {
   }
   for (const r of remotes.values()) updateRemote(r, now, dt);
 
+  hornCooldown -= dt;
+  crashCooldown -= dt;
   if (traffic) {
     traffic.update(dt, me.pos.x, me.pos.z);
     audio.traffic(traffic.nearbyVehicles);
@@ -502,6 +546,7 @@ function frame(now: number) {
 requestAnimationFrame(frame);
 
 function placeCamera(dt: number) {
+  if (car) return placeDriveCamera(dt, car);
   const far = DEBUG && params.has("far");
   let dist = far ? 70 : 7.5;
   const height = far ? 60 : 3.4;
@@ -539,6 +584,164 @@ function adaptQuality(f: number) {
   renderer.setPixelRatio(pixelRatio);
   (scene.fog as THREE.Fog).far = fogFar;
 }
+
+// -------------------------------------------------------------- driving ----
+
+function enterVehicle(kind: VehicleKind) {
+  if (!me.avatar || car) return;
+  const spot = world.roadSpot(me.pos.x, me.pos.z);
+  if (!spot) {
+    toast("No road near here. Walk to a street first 🛣️");
+    return;
+  }
+  car = new PlayerVehicle(kind, spot.x, spot.z, spot.yaw);
+  if (DEBUG) Object.assign(window, { __car: car });
+  scene.add(car.root);
+  me.avatar.root.visible = false;
+  me.camYaw = spot.yaw + Math.PI;
+  cockpit = false;
+  drive.read(0); // prime button edges so the key that entered doesn't exit
+  $("drive-car").hidden = $("drive-danfo").hidden = true;
+  $("drive-exit").hidden = false;
+  $("speedo").hidden = false;
+  if (drive.needsCalibration()) toast("Wheel detected 🎮 tap Wheel setup to calibrate it");
+  else if (drive.wheelPad()) toast("Wheel ready. C = camera, H = horn, F = get out");
+  else if (isTouch) toast("Left thumb: up = gas, down = brake, sideways = steer");
+  else toast("W/S gas & brake · A/D steer · Space handbrake · H horn · C camera · F get out");
+}
+
+function exitVehicle() {
+  if (!car || !me.avatar) return;
+  // Step out on the driver's side (left), onto open ground.
+  const lx = car.x + Math.cos(car.yaw) * 2.2, lz = car.z - Math.sin(car.yaw) * 2.2;
+  const spot = world.openSpotNear(lx, lz);
+  me.pos.set(spot.x, 0, spot.z);
+  me.yaw = car.yaw;
+  me.camYaw = car.yaw + Math.PI;
+  scene.remove(car.root);
+  car = null;
+  me.avatar.root.visible = true;
+  audio.drive(false, "car", 0, 0, 0, 0);
+  $("drive-car").hidden = $("drive-danfo").hidden = false;
+  $("drive-exit").hidden = true;
+  $("speedo").hidden = true;
+}
+
+function driveFrame(dt: number, now: number) {
+  const c = car!;
+  const inp = drive.read(dt);
+  // Touch: the left-thumb joystick doubles as steering and pedals.
+  if (isTouch && inp.device === "keyboard") {
+    input.update();
+    inp.steer = input.move.x;
+    inp.throttle = Math.max(0, input.move.y);
+    inp.brake = Math.max(0, -input.move.y);
+  }
+  c.update(dt, inp, world);
+
+  if (traffic) {
+    const fx = Math.sin(c.yaw), fz = Math.cos(c.yaw);
+    const r = c.spec.width / 2;
+    for (const o of [c.spec.length / 2 - r, -(c.spec.length / 2 - r)]) {
+      const hit = traffic.collide(c.x + fx * o, c.z + fz * o, r);
+      if (hit) c.bump(hit.nx, hit.nz, hit.depth);
+    }
+  }
+  if (c.impact > 1.5 && crashCooldown <= 0) {
+    audio.crash(Math.min(1, c.impact / 14));
+    crashCooldown = 0.4;
+  }
+  if (inp.horn && hornCooldown <= 0) {
+    audio.horn(0.5, 0.5, me.camYaw, c.kind);
+    hornCooldown = 0.45;
+  }
+  if (inp.camera) {
+    cockpit = !cockpit;
+    c.setCockpit(cockpit);
+  }
+  if (inp.exit) {
+    exitVehicle();
+    return;
+  }
+  lookOffset += input.takeYawDelta();
+  lookOffset *= Math.pow(0.08, dt); // drift back to centre after looking around
+  me.pos.set(c.x, 0, c.z);
+  me.yaw = c.yaw;
+  me.speed = c.speed;
+  audio.drive(true, c.kind, c.rpm, inp.throttle, c.slip, c.speed);
+  const flags = (c.speed > 0.3 ? FLAG_MOVING : 0) | FLAG_DRIVING | (c.kind === "danfo" ? FLAG_DANFO : 0);
+  net.sendMove(c.x, c.z, c.yaw, flags, now);
+  $("kmh").textContent = String(Math.round(Math.abs(c.vf) * 3.6));
+  $("gear").textContent = c.vf < -0.5 ? "R" : String(c.gear);
+}
+
+function placeDriveCamera(dt: number, c: PlayerVehicle) {
+  const fx = Math.sin(c.yaw), fz = Math.cos(c.yaw);
+  if (cockpit) {
+    // Driver's eye: left seat, looking down the road (plus any look-around).
+    const p = c.spec.cockpit;
+    const rx = -fz, rz = fx;
+    camera.position.set(c.x + fx * p.z - rx * p.x, p.y, c.z + fz * p.z - rz * p.x);
+    const ly = c.yaw + lookOffset;
+    camera.lookAt(camera.position.x + Math.sin(ly) * 10, p.y - 0.35, camera.position.z + Math.cos(ly) * 10);
+    return;
+  }
+  // Chase camera swings behind the car, further out with speed.
+  const want = c.yaw + Math.PI + lookOffset;
+  me.camYaw = lerpAngle(me.camYaw, want, Math.min(1, dt * 3.5));
+  let dist = (c.kind === "danfo" ? 9 : 7.2) + Math.min(3, c.speed * 0.06);
+  const height = c.kind === "danfo" ? 4.2 : 3.1;
+  const sx = Math.sin(me.camYaw), sz = Math.cos(me.camYaw);
+  for (let d = 1; d <= dist; d += 0.4) {
+    if (world.insideBuilding(c.x + sx * d, c.z + sz * d)) {
+      dist = Math.max(2.5, d - 0.5);
+      break;
+    }
+  }
+  const k = Math.min(1, dt * 8);
+  camera.position.x += (c.x + sx * dist - camera.position.x) * k;
+  camera.position.y += (height - camera.position.y) * k;
+  camera.position.z += (c.z + sz * dist - camera.position.z) * k;
+  camera.lookAt(c.x + fx * 3, 1.3, c.z + fz * 3);
+}
+
+$("drive-car").addEventListener("click", () => enterVehicle("car"));
+$("drive-danfo").addEventListener("click", () => enterVehicle("danfo"));
+$("drive-exit").addEventListener("click", () => exitVehicle());
+addEventListener("keydown", (e) => {
+  if (document.activeElement === chatInput || !me.avatar) return;
+  if (!car && (e.key === "f" || e.key === "F")) enterVehicle("car");
+});
+
+// Show "Wheel setup" whenever a steering wheel is plugged in.
+function refreshWheelButton() {
+  $("wheel-setup").hidden = !drive.wheelPad();
+}
+addEventListener("gamepadconnected", refreshWheelButton);
+addEventListener("gamepaddisconnected", refreshWheelButton);
+setInterval(refreshWheelButton, 2000);
+$("wheel-setup").addEventListener("click", async () => {
+  const box = $("calib");
+  box.hidden = false;
+  drive.enabled = false;
+  const cal = await runCalibration(
+    () => drive.wheelPad(),
+    (title, hint) => {
+      $("calib-title").textContent = title;
+      $("calib-hint").textContent = hint;
+    },
+  );
+  drive.enabled = true;
+  if (cal) {
+    drive.setCalibration(cal);
+    $("calib-title").textContent = "Wheel ready ✅";
+    $("calib-hint").textContent = "Saved on this browser. Tap 🚗 Drive or 🚐 Danfo and go.";
+  } else {
+    $("calib-title").textContent = "Didn't catch that 😅";
+    $("calib-hint").textContent = "Make sure the wheel is plugged in, then try Wheel setup again.";
+  }
+  setTimeout(() => (box.hidden = true), 2500);
+});
 
 // ---------------------------------------------------------------- utils ----
 

@@ -106,3 +106,21 @@ html, body {
 }
 #attrib { position: fixed; right: 6px; bottom: 2px; font-size: 9px; opacity: 0.55; pointer-events: none; }
 [hidden] { display: none !important; }
+
+#drivebar {
+  position: fixed; top: calc(max(10px, env(safe-area-inset-top)) + 40px); right: 10px;
+  display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end;
+}
+#drivebar .btn { margin-left: 0; }
+#speedo {
+  position: fixed; right: 14px; bottom: calc(68px + env(safe-area-inset-bottom));
+  background: rgba(29, 26, 22, 0.75); color: #fff; border-radius: 14px; padding: 6px 12px;
+  display: flex; align-items: baseline; gap: 6px; font-variant-numeric: tabular-nums; pointer-events: none;
+}
+#speedo b { font-size: 30px; }
+#speedo span { font-size: 12px; opacity: 0.8; }
+#speedo i { font-style: normal; font-size: 14px; background: #ffd23f; color: #1d1a16; border-radius: 6px; padding: 1px 6px; margin-left: 4px; }
+#calib { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0, 0, 0, 0.55); }
+.calib-box { background: var(--paper); border-radius: 18px; padding: 22px 26px; width: min(420px, 90vw); text-align: center; }
+.calib-box h2 { margin: 0 0 8px; }
+.calib-box p { margin: 0; font-size: 15px; }

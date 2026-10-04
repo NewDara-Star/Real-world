@@ -8,6 +8,17 @@ A walkable, multiplayer slice of real Yaba, Lagos, in the browser. No download, 
 - **Safety:** server-side filter blocks phone numbers, bank details, links and off-platform lures; chat cooldown.
 - **Low-end first:** unlit vertex-coloured chunks, about 15–20 draw calls, fog-limited draw distance, automatic resolution scaling.
 
+## Driving (car or danfo)
+
+Tap **🚗 Drive** or **🚐 Danfo** (or press **F**) near a road. Chase and cockpit cameras (**C**).
+
+- **Steering wheel (Logitech G29 etc.) in Chrome:** plug it in, press any pedal or button once so Chrome exposes it, then **🎮 Wheel setup** and follow the steps (turn, gas, brake, then pick horn/camera/handbrake buttons). Saved per browser. No force feedback in the browser.
+- **PS5 / Xbox controller:** works without setup. Left stick steers, R2 gas, L2 brake, Cross/A handbrake, Square/X horn, Triangle/Y camera, Circle/B get out.
+- **Keyboard:** W/S gas and brake (hold S when stopped to reverse), A/D steer, Space handbrake, H horn, C camera, F get out.
+- **Phone:** left thumb up = gas, down = brake, sideways = steer.
+
+Other players see your car or danfo. Traffic stops (and honks) when you block it; walls and other vehicles stop you.
+
 ## Run locally
 
 ```sh

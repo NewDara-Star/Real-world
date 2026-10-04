@@ -33,6 +33,13 @@ interface Agent {
 const box = (w: number, h: number, d: number, x = 0, y = 0, z = 0) => new THREE.BoxGeometry(w, h, d).translate(x, y + h / 2, z);
 const wheel = (x: number, z: number, r = 0.36) => new THREE.CylinderGeometry(r, r, 0.22, 8).rotateZ(Math.PI / 2).translate(x, r, z);
 
+export function danfoTemplate() {
+  return danfo();
+}
+export function carTemplate(color: number) {
+  return car(color);
+}
+
 function danfo() {
   return makeTemplate([
     [box(1.95, 1.75, 4.6, 0, 0.35, 0), 0xf2b705],
@@ -196,6 +203,33 @@ export class Traffic {
       mesh.count = wc[i];
       mesh.instanceMatrix.needsUpdate = true;
     });
+  }
+
+  /**
+   * Push a circle (the player's car) out of nearby traffic. Returns the push
+   * normal and depth of the deepest overlap, and stops the vehicle hit.
+   */
+  collide(x: number, z: number, r: number): { nx: number; nz: number; depth: number; kind: string } | null {
+    let best: { nx: number; nz: number; depth: number; kind: string } | null = null;
+    for (const a of this.vehicles) {
+      if (!a.edge) continue;
+      const k = VEHICLE_KINDS[a.kind];
+      // Treat each vehicle as two circles along its length.
+      const fx = Math.sin(a.yaw), fz = Math.cos(a.yaw);
+      const ar = k.w / 2;
+      for (const o of [k.len / 2 - ar, -(k.len / 2 - ar)]) {
+        const cx = a.x + fx * o, cz = a.z + fz * o;
+        const dx = x - cx, dz = z - cz;
+        const d = Math.hypot(dx, dz);
+        const depth = r + ar - d;
+        if (depth > 0 && (!best || depth > best.depth)) {
+          best = { nx: dx / (d || 1), nz: dz / (d || 1), depth, kind: k.name };
+          a.speed = 0;
+          a.honkCooldown = Math.min(a.honkCooldown, 0.2);
+        }
+      }
+    }
+    return best;
   }
 
   private addEdge(road: Road, list: Edge[], nodes: Map<string, Edge[]>) {

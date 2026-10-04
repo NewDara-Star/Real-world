@@ -12,6 +12,9 @@ export const OP_MOVES = 2;
 
 export const FLAG_MOVING = 1;
 export const FLAG_RUNNING = 2;
+/** Player is driving; FLAG_DANFO picks the danfo over a car. */
+export const FLAG_DRIVING = 4;
+export const FLAG_DANFO = 8;
 
 /** Metres within which a player's movement is relayed to another player. */
 export const VIEW_RADIUS = 120;
