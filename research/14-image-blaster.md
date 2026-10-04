@@ -40,3 +40,6 @@ FAL's and World Labs' terms first.
 AI-generated assets are also a new category for our asset rule (CC0/CC-BY/MIT,
 credited). That's the owner's decision: if allowed, record the tool, source
 photo (own photos only, never Street View) and plan in `public/models/CREDITS.md`.
+
+**Decision (owner, 2026-10-04):** keep the local Claude building models in
+Blender. No AI-generated meshes for now.

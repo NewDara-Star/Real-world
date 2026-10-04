@@ -223,3 +223,4 @@ body.cockpit #speedo { right: 50%; transform: translateX(50%); bottom: 14px; }
 #map-results span { font-size: 12px; color: #9aa6b8; text-transform: capitalize; }
 .bigmap-hint { margin: 0; font-size: 12px; color: #9aa6b8; }
 #map-clear { font: inherit; border: 0; border-radius: 10px; padding: 8px; background: rgba(255, 255, 255, 0.08); color: #fff; cursor: pointer; }
+.pause-fov { display: flex; flex-direction: column; gap: 6px; font-weight: 600; }

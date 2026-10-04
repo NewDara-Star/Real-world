@@ -108,6 +108,9 @@ export interface PhysicsInput {
 
 export type GroundFn = (x: number, z: number) => number;
 
+/** Physics step (s): 240 Hz, in the range sims use (AC 333, Forza 360). */
+const STEP = 1 / 240;
+
 let ready: Promise<void> | null = null;
 let loaded = false;
 /** Load the physics engine (WebAssembly). Safe to call more than once. */
@@ -137,6 +140,10 @@ export class CarPhysics {
   tcs = 1;
   absActive = false;
   private shiftTimer = 0;
+  private acc = 0;
+  private prevT = { x: 0, y: 0, z: 0 };
+  private prevQ = { x: 0, y: 0, z: 0, w: 1 };
+  private hasPrev = false;
   private walls = new Map<number, RAPIER.Collider[]>();
   private traffic = new Map<unknown, RAPIER.RigidBody>();
   private bGrid = new Map<number, number[]>();
@@ -233,6 +240,29 @@ export class CarPhysics {
   get upY() {
     const q = this.body.rotation();
     return 1 - 2 * (q.x * q.x + q.z * q.z);
+  }
+
+  private savePrev() {
+    const t = this.body.translation(), q = this.body.rotation();
+    this.prevT = { x: t.x, y: t.y, z: t.z };
+    this.prevQ = { x: q.x, y: q.y, z: q.z, w: q.w };
+    this.hasPrev = true;
+  }
+
+  /**
+   * Pose to draw: between the last two physics steps by the time left over in
+   * the accumulator, so motion is smooth at any frame rate.
+   */
+  renderPose() {
+    const t = this.body.translation(), q = this.body.rotation();
+    if (!this.hasPrev) return { t, q };
+    const a = Math.min(1, this.acc / STEP), p = this.prevT, pq = this.prevQ;
+    const pos = { x: p.x + (t.x - p.x) * a, y: p.y + (t.y - p.y) * a, z: p.z + (t.z - p.z) * a };
+    // Normalised lerp is fine for the tiny rotation between two 240 Hz steps.
+    const sgn = pq.x * q.x + pq.y * q.y + pq.z * q.z + pq.w * q.w < 0 ? -1 : 1;
+    const r = { x: pq.x + (q.x * sgn - pq.x) * a, y: pq.y + (q.y * sgn - pq.y) * a, z: pq.z + (q.z * sgn - pq.z) * a, w: pq.w + (q.w * sgn - pq.w) * a };
+    const n = Math.hypot(r.x, r.y, r.z, r.w) || 1;
+    return { t: pos, q: { x: r.x / n, y: r.y / n, z: r.z / n, w: r.w / n } };
   }
 
   /** World point from a point in the car's frame (relative to the centre of gravity). */
@@ -343,19 +373,28 @@ export class CarPhysics {
       w.ground = ground(p.x, p.z);
     }
     const v0 = this.body.linvel();
-    const steps = Math.max(1, Math.ceil(dt / (1 / 240)));
-    const h = dt / steps;
-    this.world.timestep = h;
+    // Fixed 240 Hz steps with an accumulator, as sims do: the same step size
+    // every time, whatever the frame rate. A long hitch is dropped rather than
+    // replayed in a burst; the leftover fraction interpolates the drawn pose.
+    this.acc = Math.min(this.acc + dt, 0.1);
+    const steps = Math.floor(this.acc / STEP);
+    this.acc -= steps * STEP;
+    this.world.timestep = STEP;
     this.slip = 0;
     this.absActive = false;
+    let torque = 0;
     for (let i = 0; i < steps; i++) {
-      this.substep(h, inp);
+      if (i === steps - 1) this.savePrev();
+      this.substep(STEP, inp);
+      torque += this.steerTorque;
       this.world.step();
     }
+    // Force feedback gets the frame's average, not the last sub-step's value.
+    if (steps) this.steerTorque = torque / steps;
     const v1 = this.body.linvel();
     // A collision shows up as a sudden velocity change no tyre could produce.
     const dv = Math.hypot(v1.x - v0.x, v1.z - v0.z);
-    this.impact = dv > 9.81 * 1.6 * dt + 0.8 ? dv : 0;
+    this.impact = dv > 9.81 * 1.6 * Math.max(dt, STEP) + 0.8 ? dv : 0;
     this.automatic(dt, inp);
   }
 

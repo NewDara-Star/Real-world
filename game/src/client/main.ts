@@ -127,7 +127,16 @@ const drive = new DriveControls();
 const g29 = new G29();
 drive.g29 = g29;
 let ffbJolt = 0; // decaying crash/kerb force, -1..1
-let ffbPhase = 0;
+/**
+ * The G29's gears swallow small forces (a dead band of roughly 5-10 %), so
+ * anything above a hair is lifted past it, with a linear ramp near zero so
+ * there's no chatter at the centre.
+ */
+function minForce(x: number) {
+  const m = 0.06, eps = 0.02;
+  const a = Math.min(1, Math.abs(x));
+  return Math.sign(x) * (a < eps ? (a / eps) * (m + (1 - m) * eps) : m + (1 - m) * a);
+}
 /** Force feedback settings from the wheel monitor: strength 0..1.5, and direction. */
 const ffb = (() => {
   try {
@@ -546,7 +555,10 @@ function frame(now: number) {
   last = now;
   if (!world.meta) return;
   pollPauseButton();
-  if (mapView?.open) return; // the map covers the screen; nothing to simulate or draw
+  if (mapView?.open) {
+    g29.zero(); // nothing is driving the wheel while the map is up
+    return; // the map covers the screen; nothing to simulate or draw
+  }
   if (paused) {
     // Frozen: keep drawing the scene but advance nothing.
     gfx.render();
@@ -828,21 +840,19 @@ function driveFrame(dt: number, now: number) {
     if (c.kerbJolt) ffbJolt = c.kerbJolt;
     const dir = ffb.invert ? -1 : 1;
     if (c.phys) {
-      // Like sim racing: the wheel is driven by the front tyres' self-aligning
-      // torque, which builds with cornering force and goes light as they slide.
-      // A little spring and a faint road texture sit underneath.
-      void g29.setSpring(0.06 * ffb.gain);
-      ffbPhase += dt * (8 + c.speed * 1.5);
-      const buzz = c.speed > 2 ? Math.sin(ffbPhase) * Math.min(0.03, c.speed / 800) : 0;
+      // Like sim racing: the force is the front tyres' aligning torque at the
+      // steering rack (averaged over the frame's physics steps). The wheel's
+      // own centring spring is off so it can't fight that, and the wheel's
+      // firmware damper keeps the loop from oscillating, firmer when slow.
+      void g29.setSpring(0);
+      void g29.setDamper(0.13 + 0.2 * Math.max(0, 1 - c.speed / 8));
       const align = c.phys.steerTorque * 0.045;
-      void g29.setForce(dir * ffb.gain * Math.max(-1, Math.min(1, align + ffbJolt + buzz)));
+      void g29.setForce(dir * minForce(ffb.gain * (align + ffbJolt)));
     } else {
-      // Power-steering feel: light when parked, firmer with speed, lighter when sliding.
-      void g29.setSpring(Math.min(0.85, 0.12 + c.speed / 30) * (1 - c.slip * 0.6) * ffb.gain);
-      // Road texture: a faint buzz that grows with speed, plus any crash jolt.
-      ffbPhase += dt * (8 + c.speed * 1.5);
-      const buzz = c.speed > 2 ? Math.sin(ffbPhase) * Math.min(0.06, c.speed / 400) : 0;
-      void g29.setForce(dir * ffb.gain * (Math.abs(ffbJolt) > 0.02 ? ffbJolt : buzz));
+      // Older car model: speed-scaled centring spring, plus crash jolts.
+      void g29.setDamper(0.13);
+      void g29.setSpring(Math.min(0.85, 0.12 + c.speed / 30) * (1 - c.slip * 0.6) * Math.min(1, ffb.gain));
+      void g29.setForce(dir * minForce(ffb.gain * ffbJolt));
     }
     void g29.setRevLights(c.rpm > 0.35 ? (c.rpm - 0.35) / 0.6 : 0);
   }
@@ -924,11 +934,35 @@ function updateHeadlights(c: PlayerVehicle | null) {
   headlight.intensity = full ? 70 : 35;
 }
 
+/** Cockpit vertical field of view (degrees). Assetto Corsa's default is about 56. */
+let cockpitFov = (() => {
+  try {
+    return Number(localStorage.getItem("cockpit-fov")) || 56;
+  } catch {
+    return 56;
+  }
+})();
+$<HTMLInputElement>("pause-fov").value = String(cockpitFov);
+$("pause-fov-val").textContent = String(cockpitFov);
+$("pause-fov").addEventListener("input", () => {
+  cockpitFov = Number($<HTMLInputElement>("pause-fov").value);
+  $("pause-fov-val").textContent = String(cockpitFov);
+  try {
+    localStorage.setItem("cockpit-fov", String(cockpitFov));
+  } catch {
+    // ignore
+  }
+  if (cockpit) {
+    camera.fov = cockpitFov;
+    camera.updateProjectionMatrix();
+  }
+});
+
 /** Cockpit: wider lens like a real driver's view, speedo moves to the dash. */
 function setCockpit(c: PlayerVehicle, on: boolean) {
   cockpit = on;
   c.setCockpit(on);
-  camera.fov = on ? 68 : 60;
+  camera.fov = on ? cockpitFov : 60;
   camera.updateProjectionMatrix();
   document.body.classList.toggle("cockpit", on);
 }
@@ -948,7 +982,7 @@ function placeDriveCamera(dt: number, c: PlayerVehicle) {
     const ey = p.y + lean * 0.05;
     const ez = p.z - lean * 0.12;
     // The head rides with the car, so pitch under braking and roll in bends show.
-    c.placeCamera(camera, ex, ey, ez, lookOffset + headYaw);
+    c.placeCamera(camera, ex, ey, ez, lookOffset + headYaw, dt);
     return;
   }
   camera.up.set(0, 1, 0);
@@ -1018,7 +1052,7 @@ function updateWheelMon(dt: number) {
   if (!wheelMonOpen) return;
   if (!car) drive.read(dt); // refresh readings while walking too
   const d = drive.debug;
-  $("wm-source").textContent = `${d.source}${d.id ? ` · ${d.id}` : ""}`;
+  $("wm-source").textContent = `${d.source}${d.id ? ` · ${d.id}` : ""}${g29.connected ? ` · force feedback on${g29.writeErrors ? ` (${g29.writeErrors} write errors)` : ""}` : " · no force feedback (click Connect wheel)"}`;
   const steer = $("wm-steer");
   steer.style.left = `${50 + Math.min(0, d.steer) * 50}%`;
   steer.style.width = `${Math.abs(d.steer) * 50}%`;
@@ -1044,6 +1078,15 @@ $("wheel-connect").addEventListener("click", async () => {
   }
 });
 addEventListener("pagehide", () => void g29.release());
+// Never leave the wheel pulling on its own: zero the force when the window is
+// hidden or loses focus, or when the game stops updating it (a stall).
+addEventListener("blur", () => g29.zero());
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) g29.zero();
+});
+setInterval(() => {
+  if (g29.connected && g29.forceAge > 0.15) g29.zero();
+}, 100);
 addEventListener("gamepadconnected", refreshWheelButton);
 addEventListener("gamepaddisconnected", refreshWheelButton);
 setInterval(refreshWheelButton, 2000);
@@ -1163,7 +1206,7 @@ function setPaused(on: boolean) {
   $("pause").hidden = !on;
   if (on) {
     audio.drive(false, "car", 0, 0, 0, 0);
-    void g29.setForce(0);
+    g29.zero();
     $("pause-resume").focus();
   } else {
     drive.read(0); // drop taps made while paused

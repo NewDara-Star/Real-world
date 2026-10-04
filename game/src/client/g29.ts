@@ -110,10 +110,19 @@ export class G29 {
   get connected() {
     return !!this.device?.opened && !!this.state;
   }
-  private queue: Promise<void> = Promise.resolve();
+  // Output: one report in flight at a time, and only the newest value per
+  // channel is ever sent (stale forces are dropped, never queued). This is how
+  // the Linux new-lg4ff driver paces the wheel.
+  private busy = false;
+  private pending = new Map<string, number[]>();
   private lastForce = -1;
+  private forcePlaying = false;
   private lastSpring = -1;
+  private lastDamper = -1;
   private lastLeds = -1;
+  private lastForceAt = 0;
+  /** Write failures since connecting, for the wheel monitor. */
+  writeErrors = 0;
   onChange?: (connected: boolean) => void;
 
   static supported() {
@@ -172,6 +181,9 @@ export class G29 {
       return false;
     }
     this.device = d;
+    this.lastForce = this.lastSpring = this.lastDamper = this.lastLeds = -1;
+    this.forcePlaying = false;
+    this.pending.clear();
     this.layout = buildLayout(d.collections ?? []);
     this.mode = this.layout ? `descriptor (${d.productName || d.productId.toString(16)})` : "fixed G29 map";
     d.addEventListener("inputreport", (e) => this.parse(e.data, e.reportId));
@@ -258,31 +270,54 @@ export class G29 {
   /** Rotation range in degrees (40..900). */
   setRange(deg: number) {
     const r = Math.round(Math.max(40, Math.min(900, deg)));
-    return this.out([0xf8, 0x81, r & 0xff, r >> 8, 0, 0, 0]);
+    return this.out("range", [0xf8, 0x81, r & 0xff, r >> 8, 0, 0, 0]);
   }
 
   /**
-   * Self-centring spring, 0..1. Driven by speed so the wheel feels light when
-   * parked and firm at speed, like real power steering.
+   * The wheel's built-in centring spring, 0..1. Only for when no real force
+   * feedback is running (walking, menus): under the tyre forces it would fight
+   * them. The firmware takes strengths 0..7 (the kernel never sends more).
    */
   setSpring(k: number) {
-    const level = Math.round(Math.max(0, Math.min(1, k)) * 15);
+    const level = Math.round(Math.max(0, Math.min(1, k)) * 7);
     if (level === this.lastSpring) return Promise.resolve();
     this.lastSpring = level;
-    if (level === 0) return this.out([0xf5, 0, 0, 0, 0, 0, 0]);
-    return this.out([0xfe, 0x0d, level, level, 0xff, 0, 0]).then(() => this.out([0x14, 0, 0, 0, 0, 0, 0]));
+    if (level === 0) return this.out("spring", [0xf5, 0, 0, 0, 0, 0, 0]);
+    const clip = Math.round(0x40 + (level / 7) * 0xbf);
+    return this.out("spring", [0xfe, 0x0d, level, level, clip, 0, 0]).then(() => this.out("spring2", [0x14, 0, 0, 0, 0, 0, 0]));
   }
 
   /**
-   * Constant force, -1 (pull left) .. 1 (pull right). Used for crash jolts,
-   * kerb strikes and road texture. Quantised so we only send on change.
+   * Damper in the wheel's own firmware (effect slot 2), 0..1: resists the rim's
+   * speed, computed inside the wheel so USB delay doesn't matter. Every sim
+   * uses one to stop the steering force oscillating. Coefficient is 4-bit.
+   */
+  setDamper(k: number) {
+    const level = Math.round(Math.max(0, Math.min(1, k)) * 15);
+    if (level === this.lastDamper) return Promise.resolve();
+    this.lastDamper = level;
+    if (level === 0) return this.out("damper", [0x23, 0, 0, 0, 0, 0, 0]);
+    return this.out("damper", [0x21, 0x0c, level, 0, level, 0, 0xff]);
+  }
+
+  /**
+   * Constant force (effect slot 1), -1 (pull left) .. 1 (pull right). The
+   * effect starts once and is then only refreshed, never stopped at zero, so
+   * there's no notch at the centre.
    */
   setForce(f: number) {
+    this.lastForceAt = performance.now();
     const x = Math.round(0x80 - Math.max(-1, Math.min(1, f)) * 0x7f);
     if (x === this.lastForce) return Promise.resolve();
     this.lastForce = x;
-    if (x === 0x80) return this.out([0x13, 0, 0, 0, 0, 0, 0]);
-    return this.out([0x11, 0x08, x, 0x80, 0, 0, 0]);
+    const op = this.forcePlaying ? 0x1c : 0x11; // refresh a running effect, or download and play
+    this.forcePlaying = true;
+    return this.out("force", [op, 0x08, x, 0x80, 0, 0, 0]);
+  }
+
+  /** Seconds since the game last set a force (for the stall watchdog). */
+  get forceAge() {
+    return (performance.now() - this.lastForceAt) / 1000;
   }
 
   /** Rev lights: 0..1 lights the five shift LEDs from the outside in. */
@@ -291,28 +326,59 @@ export class G29 {
     const mask = [0, 1, 3, 7, 15, 31][n];
     if (mask === this.lastLeds) return Promise.resolve();
     this.lastLeds = mask;
-    return this.out([0xf8, 0x12, mask, 0, 0, 0, 1]);
+    return this.out("leds", [0xf8, 0x12, mask, 0, 0, 0, 1]);
   }
 
   /** Leave the wheel limp and dark (on exit or page hide). */
   async release() {
     if (!this.device) return;
-    this.lastForce = this.lastSpring = this.lastLeds = -1;
-    await this.out([0x13, 0, 0, 0, 0, 0, 0]);
-    await this.out([0xf5, 0, 0, 0, 0, 0, 0]);
-    await this.out([0xf8, 0x12, 0, 0, 0, 0, 1]);
+    this.pending.clear();
+    this.lastForce = this.lastSpring = this.lastDamper = this.lastLeds = -1;
+    this.forcePlaying = false;
+    await this.out("force", [0x13, 0, 0, 0, 0, 0, 0]);
+    await this.out("damper", [0x23, 0, 0, 0, 0, 0, 0]);
+    await this.out("spring", [0xf5, 0, 0, 0, 0, 0, 0]);
+    await this.out("leds", [0xf8, 0x12, 0, 0, 0, 0, 1]);
   }
 
-  private out(bytes: number[]) {
-    const d = this.device;
-    if (!d) return Promise.resolve();
-    return this.send(d, bytes);
+  /** Zero the force right away (window hidden, map open, game stalled). */
+  zero() {
+    if (!this.device) return;
+    this.lastForce = -1;
+    void this.setForce(0);
   }
 
-  /** Serialise writes: WebHID rejects overlapping sendReport calls on some platforms. */
+  /** Latest value per channel wins; one report in flight at a time. */
+  private out(channel: string, bytes: number[]) {
+    if (!this.device) return Promise.resolve();
+    this.pending.delete(channel); // re-insert so channels take turns in order
+    this.pending.set(channel, bytes);
+    return this.pump();
+  }
+
+  private async pump() {
+    if (this.busy) return;
+    this.busy = true;
+    try {
+      while (this.device && this.pending.size) {
+        const [channel, bytes] = this.pending.entries().next().value as [string, number[]];
+        this.pending.delete(channel);
+        try {
+          await this.device.sendReport(0, new Uint8Array(bytes));
+        } catch {
+          this.writeErrors++;
+        }
+      }
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /** One-off write outside the paced channels (mode switching before attach). */
   private send(d: HIDDevice, bytes: number[]) {
-    this.queue = this.queue.then(() => d.sendReport(0, new Uint8Array(bytes))).catch(() => undefined);
-    return this.queue;
+    return d.sendReport(0, new Uint8Array(bytes)).catch(() => {
+      this.writeErrors++;
+    });
   }
 }
 

@@ -111,6 +111,8 @@ export class DriveControls {
   private keys = new Set<string>();
   private cal: WheelCalibration | null = null;
   private kbSteer = 0;
+  private kbGas = 0;
+  private kbBrake = 0;
   private prevButtons = new Set<string>();
   /** Gamepad-API axis carrying the wheel's d-pad (a HID hat), once seen. */
   private hatAxis = -1;
@@ -224,11 +226,19 @@ export class DriveControls {
     // Keyboard: steering eases in and out so taps aren't twitchy.
     if (this.enabled) {
       const target = (k.has("d") || k.has("arrowright") ? 1 : 0) - (k.has("a") || k.has("arrowleft") ? 1 : 0);
-      const rate = target === 0 ? 4 : 2.2;
+      // Toward lock steadily, back to centre quicker, fastest when reversing direction.
+      const reversing = target !== 0 && Math.sign(target) !== Math.sign(this.kbSteer) && Math.abs(this.kbSteer) > 0.02;
+      const rate = target === 0 ? 5 : reversing ? 7 : 2.6;
       this.kbSteer += Math.max(-rate * dt, Math.min(rate * dt, target - this.kbSteer));
       out.steer = this.kbSteer;
-      out.throttle = k.has("w") || k.has("arrowup") ? 1 : 0;
-      out.brake = k.has("s") || k.has("arrowdown") ? 1 : 0;
+      // Keys are on/off; real pedals aren't. Ramp them like a foot would, and
+      // brake firmly but not flat out unless Shift is held (an emergency stop).
+      const gas = k.has("w") || k.has("arrowup") ? 1 : 0;
+      const brk = k.has("s") || k.has("arrowdown") ? (k.has("shift") ? 1 : 0.65) : 0;
+      this.kbGas += Math.max(-6 * dt, Math.min(3 * dt, gas - this.kbGas));
+      this.kbBrake += Math.max(-8 * dt, Math.min(4 * dt, brk - this.kbBrake));
+      out.throttle = this.kbGas;
+      out.brake = this.kbBrake;
       out.handbrake = k.has(" ");
       out.horn = k.has("h");
       out.horn ||= this.tapped.has("h");

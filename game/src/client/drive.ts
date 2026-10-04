@@ -22,6 +22,11 @@ export interface TrafficSource {
 // body's frame (centre of gravity; +x left, +z forward).
 const ORIGIN = { x: 0, y: -HATCH_AUTO.cgHeight, z: -(HATCH_AUTO.cgToRear - HATCH_AUTO.cgToFront) / 2 };
 const PATH_Y = 0.15, ROAD_Y = 0.03;
+const tmpV = new THREE.Vector3();
+function rotateAdd(q: { x: number; y: number; z: number; w: number }, v: { x: number; y: number; z: number }, t: { x: number; y: number; z: number }) {
+  tmpV.set(v.x, v.y, v.z).applyQuaternion(new THREE.Quaternion(q.x, q.y, q.z, q.w));
+  return { x: tmpV.x + t.x, y: tmpV.y + t.y, z: tmpV.z + t.z };
+}
 
 // The player's vehicle. The car runs on the rigid-body simulation in
 // carphysics.ts (Rapier, Pacejka tyres, DSG automatic). The danfo, and the car
@@ -424,15 +429,16 @@ export class PlayerVehicle {
       for (let i = 0; i < steps; i++) this.step(h, inp, world);
     }
     this.sync();
-    // The on-screen wheel mirrors the player's input: full lock = 1.25 turns
-    // each way, like the G29's 900 degrees. Positive z turns it clockwise as
-    // seen from the driver's seat.
-    this.steeringWheel.rotation.z = inp.steer * Math.PI * 1.25;
+    // The on-screen wheel shows what the front wheels are doing: full lock is
+    // 1.25 turns (450 degrees) each way, the G29's 900 degrees lock to lock.
+    // Positive z turns it clockwise as seen from the driver's seat.
+    const rim = (this.phys ? this.steerCmd : this.steerAngle / this.spec.maxSteer) * Math.PI * 2.5;
+    this.steeringWheel.rotation.z = rim;
     if (this.model) {
       const m = this.model;
       if (m.steering && this.steerBase) {
         // Turn about the column (the node's local Y axis).
-        m.steering.quaternion.copy(this.steerBase).multiply(this.tmpQ.setFromAxisAngle(AXIS_Y, -inp.steer * Math.PI * 1.25));
+        m.steering.quaternion.copy(this.steerBase).multiply(this.tmpQ.setFromAxisAngle(AXIS_Y, -rim));
       }
       // Road wheels: roll with speed, fronts steer (model axes: X axle, Z up).
       this.wheelSpin -= (this.vf * dt) / 0.36;
@@ -473,14 +479,16 @@ export class PlayerVehicle {
   /** Rigid-body car: feed the controls in, read the state back out. */
   private stepPhysics(dt: number, inp: DriveInput, world: World, traffic?: TrafficSource) {
     const p = this.phys!;
-    // A real wheel is the steering wheel (900 degrees, 14:1). Keys and pads
-    // get a rate limit and less lock at speed, as in every driving game.
+    // A real wheel is the steering wheel (900 degrees, 14:1), untouched. Keys
+    // and pads get less lock at speed, capped near the tyres' grip limit, as in
+    // every driving game.
     if (inp.device === "wheel") this.steerCmd = inp.steer;
     else {
       const v = Math.max(1, Math.abs(this.vf));
       const lock = Math.min(1, Math.atan((2.55 * 0.8 * 9.81) / (v * v)) / HATCH_AUTO.maxSteer);
+      // The keys already ease in and out (wheel.ts); pads get a light rate limit.
       const target = inp.steer * lock;
-      const rate = inp.device === "gamepad" ? 6 : 2.2;
+      const rate = inp.device === "gamepad" ? 6 : 50;
       this.steerCmd += Math.max(-rate * dt, Math.min(rate * dt, target - this.steerCmd));
     }
     const net = world.net;
@@ -520,14 +528,51 @@ export class PlayerVehicle {
     }
   }
 
-  /** Place a camera at a point in the car's frame, looking `look` radians left of ahead. */
-  placeCamera(cam: THREE.Camera, ex: number, ey: number, ez: number, look: number) {
+  // Driver's head: sims hang the cockpit camera on a spring rather than bolting
+  // it to the body (Rigs of Rods, Stunt Rally; Forza/AC "head movement").
+  private head = { x: 0, z: 0, vx: 0, vz: 0, y: 0, pitch: 0, roll: 0, lastVf: 0, init: false };
+  private camE = new THREE.Euler(0, 0, 0, "YXZ");
+  private camQ = new THREE.Quaternion();
+  private lookQ = new THREE.Quaternion();
+
+  /**
+   * Place a camera at the driver's eye (a point in the car's frame), looking
+   * `look` radians left of ahead. The head keeps a level-ish horizon (35 % of
+   * the body's pitch and roll, smoothed), rides out bumps, and sways against
+   * acceleration, braking and cornering on a damped spring.
+   */
+  placeCamera(cam: THREE.Camera, ex: number, ey: number, ez: number, look: number, dt = 1 / 60) {
     this.root.updateMatrixWorld();
-    const p = this.root.localToWorld(new THREE.Vector3(ex, ey, ez));
-    const t = this.root.localToWorld(new THREE.Vector3(ex + Math.sin(look) * 10, ey - 0.35, ez + Math.cos(look) * 10));
+    const h = this.head;
+    dt = Math.min(dt, 0.05);
+    // Accelerations in the car's frame (m/s²): forward, and toward the left.
+    const ax = dt > 0 ? (this.vf - h.lastVf) / dt : 0;
+    h.lastVf = this.vf;
+    const ay = this.vf * this.yawRate;
+    // Spring-damper neck, about 1.3 Hz with damping ratio ~0.6; the head lags
+    // behind the car: back under acceleration, forward under braking, outward in bends.
+    const k = 70, c = 10;
+    const tz = -Math.max(-12, Math.min(12, ax)) * 0.004, tx = -Math.max(-12, Math.min(12, ay)) * 0.003;
+    h.vz += (k * (tz - h.z) - c * h.vz) * dt;
+    h.vx += (k * (tx - h.x) - c * h.vx) * dt;
+    h.z += h.vz * dt;
+    h.x += h.vx * dt;
+    const p = this.root.localToWorld(new THREE.Vector3(ex + h.x, ey, ez + h.z));
+    // Smooth vertical jolts (kerbs, bumps) a little; the body still moves the eye.
+    if (!h.init) h.y = p.y;
+    h.y += (p.y - h.y) * Math.min(1, dt * 18);
+    p.y = h.y;
+    this.camE.setFromQuaternion(this.root.quaternion, "YXZ");
+    const yaw = this.camE.y;
+    h.pitch += (this.camE.x * 0.35 - h.pitch) * Math.min(1, dt * 8);
+    h.roll += (this.camE.z * 0.35 - h.roll) * Math.min(1, dt * 8);
+    h.init = true;
+    this.camQ.setFromEuler(this.camE.set(h.pitch, yaw, h.roll, "YXZ"));
+    // In that frame the camera faces forward (+z, so turned half a circle from
+    // a camera's -z), turned by the look angle and tilted 2 degrees down.
+    this.lookQ.setFromEuler(this.camE.set(-0.035, look + Math.PI, 0, "YXZ"));
     cam.position.copy(p);
-    cam.up.set(0, 1, 0).applyQuaternion(this.root.quaternion);
-    cam.lookAt(t);
+    cam.quaternion.copy(this.camQ).multiply(this.lookQ);
   }
 
   /** Free the physics world (on getting out). */
@@ -542,7 +587,8 @@ export class PlayerVehicle {
 
     // Speed-sensitive steering: full lock when parking, gentler at speed.
     const lockScale = 1 / (1 + Math.abs(speed) / 18);
-    const target = inp.steer * s.maxSteer * (inp.device === "wheel" ? Math.max(0.35, lockScale * 1.2) : lockScale);
+    // A real wheel steers 1:1 (no speed scaling); keys and pads get less lock at speed.
+    const target = inp.steer * s.maxSteer * (inp.device === "wheel" ? 1 : lockScale);
     const steerRate = inp.device === "wheel" ? 30 : 4;
     this.steerAngle += Math.max(-steerRate * h, Math.min(steerRate * h, target - this.steerAngle));
 
@@ -665,8 +711,8 @@ export class PlayerVehicle {
   private sync() {
     if (this.phys) {
       // The whole body pitches, rolls and rides on its springs.
-      const o = this.phys.toWorld(ORIGIN);
-      const q = this.phys.body.rotation();
+      const { t, q } = this.phys.renderPose();
+      const o = rotateAdd(q, ORIGIN, t);
       this.root.position.set(o.x, o.y, o.z);
       this.root.quaternion.set(q.x, q.y, q.z, q.w);
       this.body.rotation.z = 0;
