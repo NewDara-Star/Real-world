@@ -807,6 +807,7 @@ function exitVehicle() {
   $("exam").hidden = true;
 }
 
+let keyboardSteering = false;
 function driveFrame(dt: number, now: number) {
   const c = car!;
   const inp = drive.read(dt);
@@ -816,6 +817,11 @@ function driveFrame(dt: number, now: number) {
     inp.steer = input.move.x;
     inp.throttle = Math.max(0, input.move.y);
     inp.brake = Math.max(0, -input.move.y);
+  }
+  // Say who's steering when it changes (a wheel plugged in, A/D pressed).
+  if (inp.device === "wheel" && inp.keyboardSteering !== keyboardSteering) {
+    keyboardSteering = inp.keyboardSteering;
+    toast(keyboardSteering ? "⌨️ Keyboard is steering. Turn the wheel to take over." : "🎮 Wheel is steering");
   }
   if (inp.shift) {
     const why = c.shift(inp.shift, inp.brake);
@@ -868,7 +874,8 @@ function driveFrame(dt: number, now: number) {
     void g29.setSpring(0);
     void g29.setDamper(0.13 + 0.2 * Math.max(0, 1 - c.speed / 8));
     const align = c.phys.steerTorque * 0.045;
-    void g29.setForce(dir * minForce(ffb.gain * (align + ffbJolt)));
+    // While the keyboard steers, no force: it would turn the wheel by itself.
+    void g29.setForce(inp.keyboardSteering ? 0 : dir * minForce(ffb.gain * (align + ffbJolt)));
     void g29.setRevLights(c.rpm > 0.35 ? (c.rpm - 0.35) / 0.6 : 0);
   }
   if (inp.horn && hornCooldown <= 0) {

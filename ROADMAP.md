@@ -13,10 +13,10 @@ slot into the order below:
   driver along the sat-nav route, so a local Claude (or a test) can drive a
   route and screenshot it. Driving by key bursts between screenshots left
   the road within 100 m.
-- **The wheel silently overrides the keyboard.** With the G29 plugged in,
-  `wheel.ts` takes steer and pedals from the wheel only, so its idle pedals
-  zero the keyboard; nothing on screen says so ("nothing behind their back").
-  Show it, or let the keyboard drive while the wheel's pedals are idle.
+- **The wheel silently overrides the keyboard:** fixed. Pedals take the
+  harder press of wheel and keyboard; steering goes to whichever was touched
+  last (A/D, or turning the wheel ~13°), with a message when it changes and
+  in Wheel check; force feedback is off while the keyboard steers.
 - **Name:** done. The owner chose "World Drive"; title, window, package and
   README use it. (Saved settings keep their `eko-` keys so nobody loses them;
   the deployed worker keeps its name.)

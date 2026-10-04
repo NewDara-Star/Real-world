@@ -33,6 +33,12 @@ export interface DriveInput {
   /** Held: glance at the passenger-side wing mirror. */
   glance: boolean;
   device: "keyboard" | "gamepad" | "wheel";
+  /**
+   * A wheel is plugged in but the keyboard is steering (A/D pressed since the
+   * wheel last turned). Force feedback stays off then, so the wheel doesn't
+   * turn itself and take over.
+   */
+  keyboardSteering: boolean;
 }
 
 /**
@@ -132,6 +138,13 @@ export class DriveControls {
       return false;
     }
   })();
+  /**
+   * Who steers when a wheel is plugged in: the last one touched, as in most PC
+   * sims. A/D hands steering to the keyboard; turning the wheel (more than
+   * ~13 degrees from where it was) takes it back. Pedals: the harder press wins.
+   */
+  steerBy: "wheel" | "keyboard" = "wheel";
+  private wheelAnchor = 0;
   /** What the last read saw, for the wheel monitor. */
   debug = { source: "keyboard", steer: 0, gas: 0, brake: 0, clutch: 0, axes: [] as number[], id: "" };
 
@@ -221,13 +234,15 @@ export class DriveControls {
     const out: DriveInput = {
       steer: 0, throttle: 0, brake: 0, handbrake: false, horn: false, camera: false, exit: false,
       shift: 0, indicatorLeft: false, indicatorRight: false, hazards: false, lights: false, wipers: false, parkBrake: false,
-      look: 0, lookBack: false, glance: false, device: "keyboard",
+      look: 0, lookBack: false, glance: false, device: "keyboard", keyboardSteering: false,
     };
+    let kbSteering = false;
     const pressed = new Set<string>();
 
     // Keyboard: steering eases in and out so taps aren't twitchy.
     if (this.enabled) {
       const target = (k.has("d") || k.has("arrowright") ? 1 : 0) - (k.has("a") || k.has("arrowleft") ? 1 : 0);
+      kbSteering = target !== 0;
       // Toward lock steadily, back to centre quicker, fastest when reversing direction.
       const reversing = target !== 0 && Math.sign(target) !== Math.sign(this.kbSteer) && Math.abs(this.kbSteer) > 0.02;
       const rate = target === 0 ? 5 : reversing ? 7 : 2.6;
@@ -249,6 +264,7 @@ export class DriveControls {
       out.glance = k.has(";");
     }
 
+    const kb = { steer: out.steer, throttle: out.throttle, brake: out.brake };
     let clutch = 0;
     const g = this.g29?.connected ? this.g29.state : null;
     const wheel = g ? null : this.wheelPad();
@@ -322,10 +338,25 @@ export class DriveControls {
       }
     }
 
-    if (this.swapPedals && out.device === "wheel") [out.throttle, out.brake] = [out.brake, out.throttle];
+    if (out.device === "wheel") {
+      if (this.swapPedals) [out.throttle, out.brake] = [out.brake, out.throttle];
+      // The wheel's idle pedals read 0, so the keyboard's pedals still work.
+      out.throttle = Math.max(out.throttle, kb.throttle);
+      out.brake = Math.max(out.brake, kb.brake);
+      if (kbSteering && this.steerBy === "wheel") {
+        this.steerBy = "keyboard";
+        this.wheelAnchor = out.steer;
+      } else if (!kbSteering && this.steerBy === "keyboard" && Math.abs(out.steer - this.wheelAnchor) > 0.03) {
+        this.steerBy = "wheel";
+      }
+      if (this.steerBy === "keyboard") {
+        out.steer = kb.steer;
+        out.keyboardSteering = true;
+      }
+    }
     const anyPad = wheel ?? (navigator.getGamepads?.() ?? []).find((p) => !!p) ?? null;
     this.debug = {
-      source: g ? `G29 direct · ${this.g29?.mode}` : wheel ? (wcal ? "wheel · gamepad mapping" : "wheel · not mapped") : out.device,
+      source: (g ? `G29 direct · ${this.g29?.mode}` : wheel ? (wcal ? "wheel · gamepad mapping" : "wheel · not mapped") : out.device) + (out.keyboardSteering ? " · keyboard steering" : ""),
       steer: out.steer,
       gas: out.throttle,
       brake: out.brake,
