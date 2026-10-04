@@ -52,9 +52,19 @@ $messages
 $diff
 PROMPT
 
+# Kill the command after $1 seconds. macOS has no GNU timeout, so fall back to
+# coreutils' gtimeout, then to perl's alarm (perl ships with macOS).
+with_timeout() {
+  local secs="$1"; shift
+  if command -v timeout >/dev/null 2>&1; then timeout "$secs" "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then gtimeout "$secs" "$@"
+  else perl -e 'alarm shift; exec @ARGV or die "exec $ARGV[0]: $!\n"' "$secs" "$@"
+  fi
+}
+
 echo "… a second Claude is reviewing the push against CLAUDE.md (up to 4 minutes)" >&2
 # Run outside the repo so the reviewer doesn't load this project's hooks.
-if ! out="$(cd /tmp && timeout 240 claude -p --output-format text < "$prompt_file" 2>&1)"; then
+if ! out="$(cd /tmp && with_timeout 240 claude -p --output-format text < "$prompt_file" 2>&1)"; then
   rm -f "$prompt_file"
   echo "⚠ review couldn't run (claude exited with an error or timed out); pushing without it:" >&2
   echo "$out" | tail -5 >&2
