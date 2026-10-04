@@ -11,9 +11,10 @@ block() {
 }
 if grep -qE '\bgit\b[^;&|]*\b(commit|push)\b' <<<"$cmd"; then
   # Only the flags count, not the message text: cut at the message (-m, -F, a heredoc).
-  flags="$(sed -E 's/[[:space:]](-m|--message|-F|--file)([[:space:]=]).*//; s/<<.*//' <<<"$cmd")"
+  # The cut runs over the whole command, not line by line: a heredoc message spans lines.
+  flags="$(perl -0pe 's/\s(-m|--message|-F|--file)[\s=].*//s; s/<<.*//s' <<<"$cmd")"
   grep -qE -- '--no-verify\b' <<<"$flags" && block "--no-verify skips the checks, story, credits and review gates. Fix what they find instead."
-  grep -qE '\bcommit\b.*[[:space:]]-[a-zA-Z]*n[a-zA-Z]*([[:space:]]|$)' <<<"$flags" && block "git commit -n skips the hooks. Fix what they find instead."
+  grep -qE '\bcommit\b[^;&|]*[[:space:]]-[a-zA-Z]*n[a-zA-Z]*([[:space:]]|$)' <<<"$flags" && block "git commit -n skips the hooks. Fix what they find instead."
   grep -qE 'REALWORLD_SKIP_REVIEW' <<<"$cmd" && block "The push review can only be skipped by the owner, not by Claude."
   grep -qE '\-c\s*core\.hooksPath' <<<"$cmd" && block "Don't override core.hooksPath; the gates live in .githooks."
   # Make sure the gates are switched on (a fresh clone, or a session that skipped SessionStart).
