@@ -40,6 +40,9 @@ export function danfoTemplate() {
 export function carTemplate(color: number) {
   return car(color);
 }
+export function walkerTemplate(shirt: number, step: number) {
+  return walker(shirt, step);
+}
 
 function danfo() {
   return makeTemplate([

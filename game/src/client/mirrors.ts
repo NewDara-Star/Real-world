@@ -1,5 +1,5 @@
 import * as THREE from "three/webgpu";
-import { float, texture, uv, vec2 } from "three/tsl";
+import { float, mix, texture, uniform, uv, vec2 } from "three/tsl";
 
 // Rear-view and wing mirrors from ONE extra render: a wide, low-resolution
 // camera looking backwards from the driver's head. Each mirror samples its
@@ -32,6 +32,9 @@ const VIEWS: Record<MirrorKind, { h: [number, number]; v: [number, number] }> = 
   right: { h: [-32, -8], v: [-10, 6] },
 };
 
+/** 1 flips the mirror image vertically (escape hatch, see setFlip). */
+const flipV = uniform(0);
+
 export class Mirrors {
   readonly camera = new THREE.PerspectiveCamera(1, W / H, 0.3, 450);
   readonly target = new THREE.RenderTarget(W, H, { type: THREE.HalfFloatType, depthBuffer: true });
@@ -51,13 +54,20 @@ export class Mirrors {
       const u0 = uAt(h[1]), u1 = uAt(h[0]);
       const v0 = vAt(v[0]), v1 = vAt(v[1]);
       const st = uv();
-      const coord = vec2(float(u0).add(st.x.mul(u1 - u0)), float(v0).add(st.y.mul(v1 - v0)));
+      // Sampled top-down: the render target's rows run opposite to the glass's uv.
+      const vy = float(v1).sub(st.y.mul(v1 - v0));
+      const coord = vec2(float(u0).add(st.x.mul(u1 - u0)), mix(vy, float(1).sub(vy), flipV));
       const m = new THREE.MeshBasicNodeMaterial();
       // A real mirror loses a little light.
       m.colorNode = texture(this.target.texture, coord).rgb.mul(0.88);
       m.fog = false;
       this.materials[k] = m;
     }
+  }
+
+  /** Flip every mirror vertically, for a GPU that reads render targets the other way up. */
+  setFlip(on: boolean) {
+    flipV.value = on ? 1 : 0;
   }
 
   /** Place the rear camera at the driver's head, looking back, and render. */

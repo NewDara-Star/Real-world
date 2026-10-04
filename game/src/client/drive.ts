@@ -126,6 +126,9 @@ export class PlayerVehicle {
     this.steeringWheel.rotation.x = -0.45;
     this.cockpitGroup.add(this.steeringWheel);
     this.buildCabin(mat);
+    // The interior is for the driver's eyes only: the mirror camera (layer 0)
+    // looks straight through it, like real mirrors outside the cabin.
+    this.cockpitGroup.traverse((o) => o.layers.set(1));
     this.cockpitGroup.visible = false;
     this.lamps = this.buildLamps();
     this.root.add(this.cockpitGroup);

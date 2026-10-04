@@ -2,6 +2,8 @@ import * as THREE from "three/webgpu";
 import { createWorldMaterial, FACADE_FLAT_ROOF, FACADE_GROUND, FACADE_KERB, FACADE_PLAIN, FACADE_ROAD, FACADE_ROAD_LINED, FACADE_TILE, FACADE_ZINC } from "./facade";
 import type { City } from "./cities";
 import { placeProps, TEMPLATES, type Template } from "./props";
+import { RoadNet } from "./roadnet";
+import { buildRoadNet } from "./roadrender";
 
 // Loads a baked world tile (see tools/bake/bake_world.py) and builds cheap
 // chunked meshes: one merged, vertex-coloured geometry per 200 m chunk. Static
@@ -73,13 +75,17 @@ export class World {
   private edges = new Map<number, number[]>(); // grid cell -> flat [ax,az,bx,bz,...] wall edges
   private roadGrid = new Map<number, RoadSeg[]>();
   private footprints = new Map<number, Float32Array[]>();
+  /** Lane-level road rules, where the place has been baked through SUMO. */
+  net: RoadNet | null = null;
 
   async load(name: string, onProgress?: (p: number) => void): Promise<void> {
-    const [metaRes, bin] = await Promise.all([
+    const [metaRes, bin, net] = await Promise.all([
       fetch(`/world/${name}.json`).then((r) => r.json() as Promise<WorldMeta>),
       fetchWithProgress(`/world/${name}.bin`, onProgress),
+      RoadNet.load(name),
     ]);
     this.meta = metaRes;
+    this.net = net;
     this.build(new DataView(bin));
   }
 
@@ -149,8 +155,10 @@ export class World {
       builderFor(c.x, c.z).building(b.pts, b.h, i, (mx, mz) => this.isShopFront(mx, mz, i));
     });
 
-    // Roads in class order so big roads sit on top of small ones.
-    const ordered = [...this.roads].sort((a, b) => b.cls - a.cls);
+    // With a road network, streets come from its lanes and junctions;
+    // otherwise roads are ribbons in class order, big roads on top.
+    if (this.net) buildRoadNet(this.net, builderFor, this.city.drive);
+    const ordered = this.net ? [] : [...this.roads].sort((a, b) => b.cls - a.cls);
     for (const r of ordered) {
       const y = r.cls === 11 ? 0.03 : 0.05 + (12 - r.cls) * 0.008;
       const code = r.cls <= 4 ? FACADE_ROAD_LINED : r.cls <= 7 ? FACADE_ROAD : FACADE_PLAIN;
@@ -417,7 +425,7 @@ export class World {
 }
 
 /** Accumulates positions, colours and facade data for one chunk. */
-class Builder {
+export class Builder {
   constructor(private city: City) {}
 
   pos: number[] = [];
@@ -427,9 +435,9 @@ class Builder {
   idx: number[] = [];
   private c = new THREE.Color();
   /** Normal for subsequent vertices (walls set their own; everything else faces up). */
-  private n = [0, 1, 0];
+  n = [0, 1, 0];
 
-  private vert(x: number, y: number, z: number, color: THREE.Color, shade: number, u = 0, fy = 0, code = FACADE_PLAIN, ao = 1) {
+  vert(x: number, y: number, z: number, color: THREE.Color, shade: number, u = 0, fy = 0, code = FACADE_PLAIN, ao = 1) {
     this.pos.push(x, y, z);
     this.col.push(color.r * shade, color.g * shade, color.b * shade);
     this.nrm.push(this.n[0], this.n[1], this.n[2]);

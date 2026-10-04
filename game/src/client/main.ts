@@ -8,6 +8,9 @@ import { Avatar } from "./avatar";
 import { Input } from "./input";
 import { Net } from "./net";
 import { Traffic } from "./traffic";
+import { NetTraffic } from "./trafficnet";
+import { RoadSigns } from "./roadsigns";
+import { ALLOW_CAR, LaneKind } from "./roadnet";
 import { World, type Place } from "./world";
 import { FLAG_DANFO, FLAG_DRIVING, FLAG_MOVING, FLAG_RUNNING, type MoveState, type PlayerInfo } from "../shared/protocol";
 import { PlayerVehicle, type VehicleKind } from "./drive";
@@ -47,6 +50,8 @@ const renderer = gfx.renderer;
 const scene = gfx.scene;
 const camera = gfx.camera;
 camera.layers.enable(1); // mirror glass
+// Escape hatch if a GPU/driver combination still shows mirrors upside down.
+mirrors.setFlip(params.get("mirrorflip") === "1");
 let fogFar = gfx.fogFar;
 
 // Clock: real Lagos time (WAT, UTC+1) unless ?time=HH[.MM] is given.
@@ -58,7 +63,8 @@ gfx.setTime(gameHours);
 
 const world = new World(CITY);
 scene.add(world.group);
-let traffic: Traffic | null = null;
+let traffic: Traffic | NetTraffic | null = null;
+let signs: RoadSigns | null = null;
 const audio = new StreetAudio();
 
 const me = {
@@ -212,11 +218,20 @@ world
       enterBtn.textContent = "Open in Chrome to play";
       return;
     }
-    traffic = new Traffic(world, {
-      honk(x, z, kind) {
+    const honk = {
+      honk(x: number, z: number, kind: string) {
         audio.horn(x - me.pos.x, z - me.pos.z, me.camYaw, kind);
       },
-    }, isTouch ? { vehicles: 24, walkers: 30 } : { vehicles: 40, walkers: 60 });
+    };
+    // Places baked with a road network get rule-following traffic.
+    traffic = world.net
+      ? new NetTraffic(world.net, honk, isTouch ? { vehicles: 30, walkers: 50 } : { vehicles: 70, walkers: 110 })
+      : new Traffic(world, honk, isTouch ? { vehicles: 24, walkers: 30 } : { vehicles: 40, walkers: 60 });
+    if (DEBUG) Object.assign(window, { __traffic: traffic });
+    if (world.net) {
+      signs = new RoadSigns(world.net, CITY.drive);
+      scene.add(signs.group);
+    }
     scene.add(traffic.group);
     scene.add(createLightPools(world.lamps));
     enterBtn.disabled = false;
@@ -552,7 +567,10 @@ function frame(now: number) {
   hornCooldown -= dt;
   crashCooldown -= dt;
   if (traffic) {
-    traffic.update(dt, me.pos.x, me.pos.z);
+    if (traffic instanceof NetTraffic) {
+      traffic.update(dt, me.pos.x, me.pos.z, car ? { x: car.x, z: car.z, yaw: car.yaw, speed: Math.abs(car.vf), driving: true } : { x: me.pos.x, z: me.pos.z, yaw: me.yaw, speed: me.speed, driving: false });
+      signs?.update(traffic.time);
+    } else traffic.update(dt, me.pos.x, me.pos.z);
     audio.traffic(traffic.nearbyVehicles);
   }
   placeCamera(dt);
@@ -639,13 +657,13 @@ function adaptQuality(f: number) {
 
 function enterVehicle(kind: VehicleKind) {
   if (!me.avatar || car) return;
-  const spot = world.roadSpot(me.pos.x, me.pos.z);
+  const spot = laneSpot(me.pos.x, me.pos.z) ?? world.roadSpot(me.pos.x, me.pos.z);
   if (!spot) {
     toast("No road near here. Walk to a street first 🛣️");
     return;
   }
   car = new PlayerVehicle(kind, spot.x, spot.z, spot.yaw, CITY.drive);
-  if (DEBUG) Object.assign(window, { __car: car, __drive: drive });
+  if (DEBUG) Object.assign(window, { __car: car, __drive: drive, __mirrors: mirrors, __renderer: gfx.renderer });
   scene.add(car.root);
   me.avatar.root.visible = false;
   me.camYaw = spot.yaw + Math.PI;
@@ -664,6 +682,28 @@ function enterVehicle(kind: VehicleKind) {
     car.selector = "D";
     car.parkBrake = false;
   }
+}
+
+/** Nearest point in a real traffic lane (right direction, right side of the road). */
+function laneSpot(x: number, z: number) {
+  const net = world.net;
+  if (!net) return null;
+  let best: { x: number; z: number; yaw: number } | null = null, bd = 60;
+  for (const l of net.lanes) {
+    if (l.kind !== LaneKind.Road || !(l.allow & ALLOW_CAR) || l.length < 8) continue;
+    for (let k = 0; k + 3 < l.pts.length; k += 2) {
+      const ax = l.pts[k], az = l.pts[k + 1], bx = l.pts[k + 2], bz = l.pts[k + 3];
+      const dx = bx - ax, dz = bz - az, len2 = dx * dx + dz * dz || 1;
+      const t = Math.max(0.1, Math.min(0.9, ((x - ax) * dx + (z - az) * dz) / len2));
+      const px = ax + dx * t, pz = az + dz * t;
+      const d = Math.hypot(x - px, z - pz);
+      if (d < bd) {
+        bd = d;
+        best = { x: px, z: pz, yaw: Math.atan2(dx, dz) };
+      }
+    }
+  }
+  return best;
 }
 
 function exitVehicle() {
