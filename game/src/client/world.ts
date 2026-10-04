@@ -408,8 +408,16 @@ class Builder {
   building(pts: Float32Array, h: number, seed: number, shopFront: (mx: number, mz: number) => boolean) {
     const n = pts.length / 2;
     const wall = new THREE.Color(WALLS[hash(seed) % WALLS.length]);
-    const roof = new THREE.Color(h > 9 ? FLAT_ROOFS[hash(seed + 7) % FLAT_ROOFS.length] : ZINC_ROOFS[hash(seed + 3) % ZINC_ROOFS.length]);
     const facadeSeed = (hash(seed + 5) % 997) / 1000;
+    const area = Math.abs(ringArea(pts));
+    // Lagos roof logic: bungalows and most two-storey houses wear pitched zinc;
+    // taller blocks have flat concrete roofs, often with a parapet and clutter.
+    const r = (hash(seed + 13) % 1000) / 1000;
+    const kind: "zinc" | "flat" | "unfinished" =
+      area < 14 ? "flat" : h <= 4.6 ? "zinc" : h <= 7.2 ? (r < 0.65 ? "zinc" : "flat") : r < 0.22 ? "unfinished" : "flat";
+    const parapet = kind === "flat" && area > 30 ? 0.9 : 0;
+    const wallTop = h + parapet;
+
     let u = 0;
     for (let i = 0; i < n; i++) {
       const ax = pts[i * 2], az = pts[i * 2 + 1];
@@ -425,19 +433,187 @@ class Builder {
       const code = facadeSeed + (len > 2.5 && shopFront((ax + bx) / 2, (az + bz) / 2) ? 2 : 0);
       const a = this.vert(ax, 0, az, wall, 1, u, 0, code);
       const b = this.vert(bx, 0, bz, wall, 1, u + len, 0, code);
-      const c = this.vert(bx, h, bz, wall, 1, u + len, h, code);
-      const d = this.vert(ax, h, az, wall, 1, u, h, code);
+      const c = this.vert(bx, wallTop, bz, wall, 1, u + len, wallTop, code);
+      const d = this.vert(ax, wallTop, az, wall, 1, u, wallTop, code);
       this.idx.push(a, c, b, a, d, c);
       u += len;
     }
+
+    if (kind === "zinc") {
+      const zinc = new THREE.Color(ZINC_ROOFS[hash(seed + 3) % ZINC_ROOFS.length]);
+      this.hipRoof(pts, h, zinc);
+      return;
+    }
+    const slab = new THREE.Color(FLAT_ROOFS[hash(seed + 7) % FLAT_ROOFS.length]);
+    const roofRing = parapet ? offsetRing(pts, -0.25) : pts;
+    if (parapet) this.parapet(pts, roofRing, h, wallTop, wall);
+    this.n = [0, 1, 0];
+    this.fill(roofRing, h, slab, FACADE_FLAT_ROOF);
+    this.roofClutter(roofRing, h, seed, kind === "unfinished", area);
+  }
+
+  /** Fill a ring as a horizontal polygon at height y (upward facing). */
+  private fill(ring: Float32Array, y: number, color: THREE.Color, code: number) {
+    const n = ring.length / 2;
     const contour: THREE.Vector2[] = [];
-    for (let i = 0; i < n; i++) contour.push(new THREE.Vector2(pts[i * 2], pts[i * 2 + 1]));
+    for (let i = 0; i < n; i++) contour.push(new THREE.Vector2(ring[i * 2], ring[i * 2 + 1]));
     const tris = THREE.ShapeUtils.triangulateShape(contour, []);
     const base = this.pos.length / 3;
     this.n = [0, 1, 0];
-    const roofCode = h > 9 ? FACADE_FLAT_ROOF : FACADE_ZINC;
-    for (let i = 0; i < n; i++) this.vert(pts[i * 2], h, pts[i * 2 + 1], roof, 1, 0, 0, roofCode);
-    for (const t of tris) this.idx.push(base + t[0], base + t[2], base + t[1]);
+    for (let i = 0; i < n; i++) this.vert(ring[i * 2], y, ring[i * 2 + 1], color, 1, 0, 0, code);
+    for (const t of tris) this.idx.push(base + t[0], base + t[2], base + t[1], base + t[0], base + t[1], base + t[2]);
+  }
+
+  /** Flat-shaded triangle; flips winding so the normal points outward/upward as asked. */
+  private tri(p: number[][], color: THREE.Color, code: number, wantUp = true) {
+    const [a, b, c] = p;
+    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+    const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const l = Math.hypot(nx, ny, nz) || 1;
+    nx /= l;
+    ny /= l;
+    nz /= l;
+    let order = [a, b, c];
+    if ((ny < 0) === wantUp) {
+      order = [a, c, b];
+      nx = -nx;
+      ny = -ny;
+      nz = -nz;
+    }
+    this.n = [nx, ny, nz];
+    const base = this.pos.length / 3;
+    for (const q of order) this.vert(q[0], q[1], q[2], color, 1, 0, 0, code);
+    // (b - a) x (c - a) points along the normal, so a->b->c is counter-clockwise
+    // seen from the normal side: three.js's front face.
+    this.idx.push(base, base + 1, base + 2);
+  }
+
+  /**
+   * Low-pitched hip roof in corrugated zinc: a ridge along the footprint's
+   * long axis, faces sloping to eaves that overhang the walls by 35 cm.
+   */
+  private hipRoof(pts: Float32Array, h: number, color: THREE.Color) {
+    const n = pts.length / 2;
+    let cx = 0, cz = 0;
+    for (let i = 0; i < n; i++) {
+      cx += pts[i * 2];
+      cz += pts[i * 2 + 1];
+    }
+    cx /= n;
+    cz /= n;
+    let sxx = 0, szz = 0, sxz = 0;
+    for (let i = 0; i < n; i++) {
+      const dx = pts[i * 2] - cx, dz = pts[i * 2 + 1] - cz;
+      sxx += dx * dx;
+      szz += dz * dz;
+      sxz += dx * dz;
+    }
+    const ang = 0.5 * Math.atan2(2 * sxz, sxx - szz);
+    const ax = Math.cos(ang), az = Math.sin(ang); // long axis
+    const px = -az, pz = ax; // across
+    let tmin = Infinity, tmax = -Infinity, smin = Infinity, smax = -Infinity;
+    for (let i = 0; i < n; i++) {
+      const dx = pts[i * 2] - cx, dz = pts[i * 2 + 1] - cz;
+      const t = dx * ax + dz * az, s = dx * px + dz * pz;
+      tmin = Math.min(tmin, t);
+      tmax = Math.max(tmax, t);
+      smin = Math.min(smin, s);
+      smax = Math.max(smax, s);
+    }
+    const half = (smax - smin) / 2;
+    const mid = (smin + smax) / 2;
+    const rise = Math.min(3.2, Math.max(0.5, half * 0.38));
+    let t0 = tmin + half, t1 = tmax - half;
+    if (t0 > t1) t0 = t1 = (tmin + tmax) / 2;
+    const ridgeAt = (t: number) => [cx + ax * t + px * mid, h + rise, cz + az * t + pz * mid];
+    const eaves = offsetRing(pts, 0.35);
+    const ridgeOf = (x: number, z: number) => {
+      const t = Math.max(t0, Math.min(t1, (x - cx) * ax + (z - cz) * az));
+      return ridgeAt(t);
+    };
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const ea = [eaves[i * 2], h - 0.05, eaves[i * 2 + 1]];
+      const eb = [eaves[j * 2], h - 0.05, eaves[j * 2 + 1]];
+      // Project from the wall line, not the eave, so faces stay planar-ish.
+      const ra = ridgeOf(pts[i * 2], pts[i * 2 + 1]);
+      const rb = ridgeOf(pts[j * 2], pts[j * 2 + 1]);
+      this.tri([ea, eb, rb], color, FACADE_ZINC);
+      if (Math.hypot(ra[0] - rb[0], ra[2] - rb[2]) > 0.01) this.tri([ea, rb, ra], color, FACADE_ZINC);
+      // Underside of the overhang, so the eaves read from street level.
+      this.tri([ea, eb, [pts[j * 2], h - 0.05, pts[j * 2 + 1]]], color.clone().multiplyScalar(0.55), FACADE_PLAIN, false);
+      this.tri([ea, [pts[j * 2], h - 0.05, pts[j * 2 + 1]], [pts[i * 2], h - 0.05, pts[i * 2 + 1]]], color.clone().multiplyScalar(0.55), FACADE_PLAIN, false);
+    }
+  }
+
+  /** Parapet: inner face and top cap between the outer wall and an inset ring. */
+  private parapet(outer: Float32Array, inner: Float32Array, h: number, top: number, wall: THREE.Color) {
+    const n = outer.length / 2;
+    const capColor = wall.clone().multiplyScalar(0.92);
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const oa = [outer[i * 2], top, outer[i * 2 + 1]], ob = [outer[j * 2], top, outer[j * 2 + 1]];
+      const ia = [inner[i * 2], top, inner[i * 2 + 1]], ib = [inner[j * 2], top, inner[j * 2 + 1]];
+      this.tri([oa, ob, ib], capColor, FACADE_PLAIN);
+      this.tri([oa, ib, ia], capColor, FACADE_PLAIN);
+      // Inner face looks inward, toward the roof.
+      const la = [inner[i * 2], h, inner[i * 2 + 1]], lb = [inner[j * 2], h, inner[j * 2 + 1]];
+      const icx = (inner[i * 2] + inner[j * 2]) / 2, icz = (inner[i * 2 + 1] + inner[j * 2 + 1]) / 2;
+      const ocx = (outer[i * 2] + outer[j * 2]) / 2, ocz = (outer[i * 2 + 1] + outer[j * 2 + 1]) / 2;
+      this.wallQuad(la, lb, ib, ia, [icx - ocx, icz - ocz], wall.clone().multiplyScalar(0.85));
+    }
+  }
+
+  /** Vertical quad facing direction (dx, dz). */
+  private wallQuad(a: number[], b: number[], c: number[], d: number[], dir: number[], color: THREE.Color) {
+    const l = Math.hypot(dir[0], dir[1]) || 1;
+    this.n = [dir[0] / l, 0, dir[1] / l];
+    const base = this.pos.length / 3;
+    for (const q of [a, b, c, d]) this.vert(q[0], q[1], q[2], color, 1, 0, 0, FACADE_PLAIN);
+    // Emit both windings; back faces are culled, so whichever faces `dir` shows.
+    this.idx.push(base, base + 1, base + 2, base, base + 2, base + 3, base, base + 2, base + 1, base, base + 3, base + 2);
+  }
+
+  /** Lagos rooftop clutter: black water tanks, stair heads, dishes, rods from unfinished floors. */
+  private roofClutter(ring: Float32Array, h: number, seed: number, unfinished: boolean, area: number) {
+    if (area < 30) return;
+    const n = ring.length / 2;
+    let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+    for (let i = 0; i < n; i++) {
+      minX = Math.min(minX, ring[i * 2]);
+      maxX = Math.max(maxX, ring[i * 2]);
+      minZ = Math.min(minZ, ring[i * 2 + 1]);
+      maxZ = Math.max(maxZ, ring[i * 2 + 1]);
+    }
+    const rnd = mulberry(seed * 7919 + 17);
+    const spot = (margin: number) => {
+      for (let k = 0; k < 12; k++) {
+        const x = minX + margin + rnd() * Math.max(0.01, maxX - minX - margin * 2);
+        const z = minZ + margin + rnd() * Math.max(0.01, maxZ - minZ - margin * 2);
+        if (pointInPoly(ring, x, z) && pointInPoly(ring, x + margin, z) && pointInPoly(ring, x - margin, z) && pointInPoly(ring, x, z + margin) && pointInPoly(ring, x, z - margin)) return { x, z };
+      }
+      return null;
+    };
+    const tanks = area > 160 ? 2 : 1;
+    for (let k = 0; k < tanks; k++) {
+      const p = spot(1.2);
+      if (p) this.stamp(TEMPLATES.tank, p.x, p.z, rnd() * 6.28, 0.9 + rnd() * 0.3, h);
+    }
+    if (area > 70 && rnd() < 0.7) {
+      const p = spot(1.8);
+      if (p) this.stamp(TEMPLATES.stairhead, p.x, p.z, rnd() * 6.28, 1, h);
+    }
+    if (rnd() < 0.45) {
+      const p = spot(0.8);
+      if (p) this.stamp(TEMPLATES.dish, p.x, p.z, rnd() * 6.28, 1, h);
+    }
+    if (unfinished) {
+      // Rebar columns waiting for the next floor ("we go finish am").
+      for (let i = 0; i < n; i++) {
+        if (rnd() < 0.7) this.stamp(TEMPLATES.rebar, ring[i * 2], ring[i * 2 + 1], 0, 1, h);
+      }
+    }
   }
 
   ribbon(ax: number, az: number, bx: number, bz: number, w: number, y: number, hex: number, code: number, u0: number) {
@@ -582,3 +758,51 @@ export const hash = (n: number) => {
   h ^= h >>> 15;
   return h >>> 0; // XOR yields a signed int; keep it unsigned so % indexes stay positive
 };
+
+/** Signed area of a ring (shoelace). */
+function ringArea(p: Float32Array): number {
+  let a = 0;
+  const n = p.length / 2;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    a += p[i * 2] * p[j * 2 + 1] - p[j * 2] * p[i * 2 + 1];
+  }
+  return a / 2;
+}
+
+/**
+ * Offset a ring along its outward (wall) normals: d > 0 grows it (eaves),
+ * d < 0 shrinks it (parapet inset). Mitred and clamped at sharp corners.
+ */
+function offsetRing(p: Float32Array, d: number): Float32Array {
+  const n = p.length / 2;
+  const out = new Float32Array(p.length);
+  const norm = (i: number) => {
+    const j = (i + 1) % n;
+    const ex = p[j * 2] - p[i * 2], ez = p[j * 2 + 1] - p[i * 2 + 1];
+    const l = Math.hypot(ex, ez) || 1;
+    return [ez / l, -ex / l]; // same outward convention as the walls
+  };
+  for (let i = 0; i < n; i++) {
+    const a = norm((i - 1 + n) % n), b = norm(i);
+    let mx = a[0] + b[0], mz = a[1] + b[1];
+    const ml = Math.hypot(mx, mz) || 1;
+    mx /= ml;
+    mz /= ml;
+    const cos = Math.max(0.35, mx * b[0] + mz * b[1]);
+    out[i * 2] = p[i * 2] + (mx * d) / cos;
+    out[i * 2 + 1] = p[i * 2 + 1] + (mz * d) / cos;
+  }
+  return out;
+}
+
+function mulberry(seed: number) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}

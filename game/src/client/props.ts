@@ -23,7 +23,8 @@ export function makeTemplate(parts: Part[]): Template {
   const c = new THREE.Color();
   for (const [geo, hex] of parts) {
     const g = geo.index ? geo.toNonIndexed() : geo;
-    g.computeVertexNormals();
+    // Keep smooth normals that rounded shapes (spheres, detail>0 icosahedra) bring.
+    if (!g.getAttribute("normal")) g.computeVertexNormals();
     const p = g.getAttribute("position");
     const nm = g.getAttribute("normal");
     c.setHex(hex);
@@ -48,18 +49,49 @@ export function templateGeometry(t: Template): THREE.BufferGeometry {
 
 const box = (w: number, h: number, d: number, x = 0, y = 0, z = 0) => new THREE.BoxGeometry(w, h, d).translate(x, y + h / 2, z);
 
+/** Rounded puff of foliage: a smooth icosphere, slightly squashed. */
+const puff = (r: number, x: number, y: number, z: number, squash = 0.85) =>
+  new THREE.IcosahedronGeometry(r, 1).scale(1, squash, 1).translate(x, y, z);
+
+/** Neem: a full, round, puffy crown on a short trunk. */
 function shadeTree(): Template {
-  const canopy = new THREE.IcosahedronGeometry(2.3, 0).scale(1.25, 0.75, 1.25).translate(0, 4.6, 0);
-  const canopy2 = new THREE.IcosahedronGeometry(1.6, 0).scale(1.2, 0.7, 1.2).translate(0.9, 5.4, -0.4);
-  return makeTemplate([[box(0.32, 3.8, 0.32), 0x6b4a32], [canopy, 0x4f7d34], [canopy2, 0x5d8c3c]]);
+  const trunk = new THREE.CylinderGeometry(0.18, 0.28, 3.6, 7).translate(0, 1.8, 0);
+  return makeTemplate([
+    [trunk, 0x6b4a32],
+    [puff(2.1, 0, 4.6, 0), 0x4c7f30],
+    [puff(1.6, 1.3, 4.3, 0.6), 0x5a9038],
+    [puff(1.5, -1.2, 4.4, -0.5), 0x467a2c],
+    [puff(1.4, 0.2, 5.6, -0.9), 0x62993f],
+    [puff(1.2, -0.4, 5.5, 1.1), 0x548a35],
+  ]);
+}
+
+/** Almond (Terminalia): flat, layered tiers, the classic Lagos compound shade tree. */
+function almondTree(): Template {
+  const trunk = new THREE.CylinderGeometry(0.16, 0.26, 5.2, 7).translate(0, 2.6, 0);
+  return makeTemplate([
+    [trunk, 0x5e4330],
+    [puff(2.6, 0, 3.6, 0, 0.32), 0x3f7a2c],
+    [puff(2.1, 0.2, 4.6, 0.1, 0.32), 0x4f8a33],
+    [puff(1.5, -0.1, 5.5, -0.1, 0.36), 0x5f9a3c],
+  ]);
 }
 
 function palm(): Template {
-  const parts: Part[] = [[new THREE.CylinderGeometry(0.16, 0.24, 7, 5).translate(0.25, 3.5, 0), 0x7a6249]];
-  for (let i = 0; i < 7; i++) {
-    const a = (i / 7) * Math.PI * 2;
-    const frond = new THREE.BoxGeometry(3.1, 0.06, 0.55).translate(1.5, 0, 0).rotateZ(-0.38).rotateY(a).translate(0.25, 7, 0);
-    parts.push([frond, i % 2 ? 0x4c7a2e : 0x5f8f37]);
+  // Slightly leaning trunk, ten fronds that arch up then droop, coconuts.
+  const parts: Part[] = [[new THREE.CylinderGeometry(0.15, 0.25, 7.2, 7).translate(0, 3.6, 0).rotateZ(0.05), 0x7a6249]];
+  const top = new THREE.Vector3(0.36, 7.15, 0);
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2 + (i % 2) * 0.2;
+    const green = i % 3 === 0 ? 0x5f8f37 : i % 3 === 1 ? 0x4c7a2e : 0x6a9a3c;
+    const inner = new THREE.BoxGeometry(1.7, 0.05, 0.62).translate(0.85, 0, 0).rotateZ(0.18).rotateY(a).translate(top.x, top.y, top.z);
+    const tip = new THREE.Vector3(1.7 * Math.cos(0.18), 1.7 * Math.sin(0.18), 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), a);
+    const outer = new THREE.BoxGeometry(1.8, 0.05, 0.48).translate(0.9, 0, 0).rotateZ(-0.75).rotateY(a).translate(top.x + tip.x, top.y + tip.y, top.z + tip.z);
+    parts.push([inner, green], [outer, green]);
+  }
+  for (let k = 0; k < 4; k++) {
+    const a = k * 1.7;
+    parts.push([new THREE.IcosahedronGeometry(0.17, 1).translate(top.x + Math.cos(a) * 0.25, top.y - 0.35, Math.sin(a) * 0.25), 0x6b5a2a]);
   }
   return makeTemplate(parts);
 }
@@ -113,7 +145,44 @@ function wireSpan(): Template {
   return makeTemplate(parts);
 }
 
+function waterTank(): Template {
+  // The ubiquitous black plastic tank on a block stand.
+  return makeTemplate([
+    [box(1.5, 0.5, 1.5), 0x8d8a84],
+    [new THREE.CylinderGeometry(0.72, 0.78, 1.45, 14).translate(0, 1.22, 0), 0x1b1b1d],
+    [new THREE.CylinderGeometry(0.3, 0.3, 0.12, 10).translate(0, 2.0, 0), 0x2a2a2c],
+  ]);
+}
+
+function stairHead(): Template {
+  return makeTemplate([
+    [box(2.4, 2.5, 2.8), 0xd9cdb4],
+    [box(2.6, 0.15, 3.0, 0, 2.5, 0), 0xb8ad98],
+    [box(0.9, 2.0, 0.05, 0, 0, 1.42), 0x5b4230],
+  ]);
+}
+
+function dish(): Template {
+  const plate = new THREE.SphereGeometry(0.42, 12, 6, 0, Math.PI * 2, 0, Math.PI / 3).rotateX(-1.1).translate(0, 1.1, 0.05);
+  return makeTemplate([
+    [new THREE.CylinderGeometry(0.03, 0.03, 1.1, 5).translate(0, 0.55, 0), 0x777777],
+    [plate, 0xe8e6e0],
+  ]);
+}
+
+function rebar(): Template {
+  // Four rusty rods sticking out of a column top.
+  const parts: [THREE.BufferGeometry, number][] = [[box(0.32, 0.25, 0.32), 0xa59d8f]];
+  for (const [x, z] of [[-0.1, -0.1], [0.1, -0.1], [-0.1, 0.1], [0.1, 0.1]]) parts.push([box(0.03, 1.6, 0.03, x, 0.25, z), 0x6b3b22]);
+  return makeTemplate(parts);
+}
+
 export const TEMPLATES = {
+  almond: almondTree(),
+  tank: waterTank(),
+  stairhead: stairHead(),
+  dish: dish(),
+  rebar: rebar(),
   tree: shadeTree(),
   palm: palm(),
   pole: pole(),
@@ -180,7 +249,8 @@ export function placeProps(world: World): PropPlacement[] {
           const off = r.w / 2 + 2.2 + rand() * 2;
           const tx = px + nx * off * side, tz = pz + nz * off * side;
           if (free(tx, tz, 1.5)) {
-            out.push({ t: r.cls <= 4 && rand() < 0.5 ? "palm" : "tree", x: tx, z: tz, rot: rand() * 6.28, s: 0.8 + rand() * 0.5 });
+            const kind = r.cls <= 4 && rand() < 0.4 ? "palm" : rand() < 0.4 ? "almond" : "tree";
+            out.push({ t: kind, x: tx, z: tz, rot: rand() * 6.28, s: 0.8 + rand() * 0.5 });
             sinceTree = 0;
           }
         }
@@ -253,7 +323,8 @@ export function placeProps(world: World): PropPlacement[] {
       for (let z = minZ; z < maxZ; z += 11) {
         const jx = x + rand() * 8, jz = z + rand() * 8;
         if (rand() < 0.55 && pointInPoly(a.pts, jx, jz) && free(jx, jz, 1)) {
-          out.push({ t: rand() < 0.25 ? "palm" : "tree", x: jx, z: jz, rot: rand() * 6.28, s: 0.8 + rand() * 0.6 });
+          const kind = rand() < 0.2 ? "palm" : rand() < 0.35 ? "almond" : "tree";
+          out.push({ t: kind, x: jx, z: jz, rot: rand() * 6.28, s: 0.8 + rand() * 0.6 });
         }
       }
     }
