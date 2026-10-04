@@ -62,33 +62,43 @@ Runs at 2db1189, 30 shots each, every 15 s: happy, idiot, sad at
 01:30, so it covers dusk; started at the real clock, 23:00, it would miss it).
 Shot numbers are `game/shots/<run>/NNN` (kept on the Mac, not committed).
 
-- **City goes near-black in daylight on the Mac; not caused by code.** happy
-  (the first launch after the build, fresh `world-drive` profile) rendered
-  properly for all 30 shots. Every later launch of the same build is dark
-  from its first frame at the same spot (idiot/001, sad/001, check runs):
-  buildings, grass, garden walls, kerbs are one dark navy silhouette; cars,
-  people, lamp posts, sky and HUD are normal. Lower-half brightness 51 when
-  good, 8-11 when dark. Ruled out: GPU caches, HTTP/code caches, saved
-  settings (a fresh `--user-data-dir` is dark too), live weather (there is
-  none), and code: c5943ce, which rendered bright on this Mac at 20:45,
-  renders dark now; so do 8d0d569 and 2db1189. No WebGPU errors in the
-  console. Everything that goes dark draws through the facade material and
-  texture atlas; everything that doesn't, doesn't. Next: restart the Mac and
-  rerun; if it persists, log the atlas (are its texels black?) and test
-  "Real textures: off" properly (the toggle reloads the page and didn't
-  stick in this test). The garden look check waits on this.
-- **Garden walls and piers are near-black even in the good run** (happy/023,
-  happy/027: black slabs along the front gardens). Partly the model: the
-  materials that name a texture set carried that set's mean albedo as base
-  colour, and the game multiplies base colour by the texture, so the render
-  was applied twice (~0.17 x texture). Fixed in the models (base colour now
-  white, as glTF intends for a factor over a texture); not yet seen in the
-  game because of the darkness above.
-- **Hedges:** not judgeable yet (black in every shot that shows them). The
-  reference photo (Ballymun, Commons) shows clipped privet behind low walls;
-  decide on `hedge_privet_1m` once the city renders.
-- **LED lamps at night:** no visible glow or light pool in tragedy/018-029
-  (only lit windows), but these were dark launches, so unconfirmed.
+- **City near-black in daylight on the Mac: the GTAO pass at "high".**
+  Deterministic, three launches each at the Finglas spawn, 13:00:
+  `quality=medium` 43.7, 43.7, 43.7 (correct); `quality=high` 9.1, 9.1, 9.1
+  (lower-half brightness). At high, buildings, ground, kerbs and garden
+  pieces are one navy silhouette; cars, people, lamps, sky are fine. Only
+  the high/ultra branch of `graphics.ts` `buildPipeline()` differs: the
+  normal/depth pre-pass, `ao(...)` at `resolutionScale` 0.5 and
+  `builtinAOContext`; on this M4 the AO term comes out ~0 for the city
+  materials. It looked random because, with no `quality=` in the URL,
+  `adaptQuality` drops to medium below 32 fps: the launches that stuttered
+  while loading (happy right after the build; a 20:45 launch with a second
+  instance open) rendered right. Ruled out on the way: the atlas
+  (readback sum 1,501,971, brick avg 0.154/0.099/0.083, normals 124/149/249;
+  `?notex` still dark), shadows (`receiveShadow=false` + `needsUpdate` on
+  461 meshes, rebuilt, still dark), caches and saved state (fresh
+  `--user-data-dir` dark), code age (c5943ce dark too). Workaround: run the
+  Mac at `quality=medium`. Fix: find why AO is ~0 on the facade/ground
+  materials (custom `normalNode` vs the pre-pass `normalView`?); confirm
+  with five launches at high, brightness per launch.
+- **Garden walls, piers and hedges render black at medium too**
+  (happy-medium/019 right, happy-medium/024 left: a ~1 m black slab along
+  the gardens). Not the models' colour: the walls now carry a white base
+  colour (fixed in 57877a2; they had the render's mean albedo, applied twice),
+  and the hedges aren't a model at all (`streetdetail.ts` green box,
+  `0x3f6a2e`, code -14), yet both are black. So it's in how the prop
+  (-11..-13) and hedge (-14) codes render. `hedge_privet_1m` waits on this.
+- **LED lamps at night:** at medium, no lamp head glows anywhere in
+  tragedy-medium/008-028 although `LampLens` maps to `FACADE_LAMP`
+  (`models.ts:15`); no light pools on the road (item 16, not built). Also:
+  fully dark already at 18:58 (tragedy-medium/004; Dublin sunset ~19:00),
+  and lit windows are flat cream rectangles.
+- **Happy at medium** hit pedestrians again: at the business park exit
+  (happy-medium/003) and the Jamestown Road roundabout (happy-medium/009);
+  reproducible (happy/004 earlier). It waited at one red on Saint Margaret's
+  Road for 90 s and more (happy-medium/025-030): one of the 6-7 minute
+  signal cycles? Tragedy gridlocked on Melville Road again
+  (tragedy-medium/016-028), collecting kerb and footpath faults at 0 km/h.
 - **Happy driver:** stopped at red lights (happy/005-006, 016-018), no
   signalling faults. But it hit a pedestrian crossing at the Jamestown
   Business Park exit (G3, between happy/003 and 004), had a G2 "no left mirror
