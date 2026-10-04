@@ -1,8 +1,12 @@
 import * as THREE from "three";
+import { createWorldMaterial, FACADE_GROUND, FACADE_KERB, FACADE_PLAIN, FACADE_ROAD, FACADE_ROAD_LINED } from "./facade";
+import { placeProps, TEMPLATES, type Template } from "./props";
 
 // Loads a baked world tile (see tools/bake/bake_world.py) and builds cheap
-// chunked meshes: one merged, vertex-coloured geometry per 200 m chunk, with
-// lighting baked into the colours so low-end GPUs only do unlit fills.
+// chunked meshes: one merged, vertex-coloured geometry per 200 m chunk. Static
+// props (trees, poles, sellers, kiosks) are merged into the same chunks, so the
+// whole city costs one draw call per visible chunk. Windows, shopfronts, kerbs
+// and road wear are drawn procedurally by the facade shader (no textures).
 
 export interface Place {
   name: string;
@@ -20,11 +24,19 @@ export interface WorldMeta {
   attribution: string;
 }
 
+export interface Road {
+  cls: number;
+  w: number;
+  name: number;
+  pts: Float32Array;
+}
+
 interface RoadSeg {
   ax: number;
   az: number;
   bx: number;
   bz: number;
+  w: number;
   name: number;
   cls: number;
 }
@@ -45,12 +57,17 @@ const AREA_COLORS: Record<number, number> = { 1: 0x3f7d8b, 2: 0x7ea35a, 3: 0x6b9
 const GROUND = 0xc8b38c;
 const SUN = new THREE.Vector3(-0.45, 0.8, -0.35).normalize();
 
+/** Road classes 1-5 (motorway..tertiary) get kerbs and shopfronts; 1-4 get centre lines. */
+const MAJOR = 5;
+
 export class World {
   meta!: WorldMeta;
   group = new THREE.Group();
+  roads: Road[] = [];
+  areas: { kind: number; pts: Float32Array }[] = [];
   private chunks: THREE.Mesh[] = [];
   private edges = new Map<number, number[]>(); // grid cell -> flat [ax,az,bx,bz,...] wall edges
-  private roads = new Map<number, RoadSeg[]>();
+  private roadGrid = new Map<number, RoadSeg[]>();
   private footprints = new Map<number, Float32Array[]>();
 
   async load(name: string, onProgress?: (p: number) => void): Promise<void> {
@@ -63,17 +80,9 @@ export class World {
   }
 
   private build(v: DataView) {
-    let o = 0;
     const magic = String.fromCharCode(v.getUint8(0), v.getUint8(1), v.getUint8(2), v.getUint8(3));
     if (magic !== "LGW1") throw new Error("bad world file");
-    o = 4;
-    const chunkBuilders = new Map<string, Builder>();
-    const builderFor = (x: number, z: number) => {
-      const key = `${Math.floor(x / CHUNK)},${Math.floor(z / CHUNK)}`;
-      let b = chunkBuilders.get(key);
-      if (!b) chunkBuilders.set(key, (b = new Builder()));
-      return b;
-    };
+    let o = 4;
     const readPts = (n: number) => {
       const pts = new Float32Array(n * 2);
       for (let i = 0; i < n * 2; i++) pts[i] = v.getInt16(o + i * 2, true) / 10;
@@ -81,54 +90,85 @@ export class World {
       return pts;
     };
 
-    // Buildings
+    // ---- parse everything first (shopfronts need the road index) ----
+    const buildings: { h: number; pts: Float32Array }[] = [];
     const nb = v.getUint32(o, true);
     o += 4;
     for (let i = 0; i < nb; i++) {
       const h = v.getUint16(o, true) / 10;
       const n = v.getUint16(o + 2, true);
       o += 4;
-      const pts = readPts(n);
-      const c = centroid(pts);
-      builderFor(c.x, c.z).building(pts, h, i);
-      this.indexBuilding(pts);
+      buildings.push({ h, pts: readPts(n) });
     }
-
-    // Roads (drawn in class order so big roads sit on top)
     const nr = v.getUint32(o, true);
     o += 4;
-    const roads: { cls: number; w: number; name: number; pts: Float32Array }[] = [];
     for (let i = 0; i < nr; i++) {
       const cls = v.getUint8(o);
       const w = v.getUint8(o + 1) / 2;
       const name = v.getUint16(o + 2, true);
       const n = v.getUint16(o + 4, true);
       o += 6;
-      roads.push({ cls, w, name, pts: readPts(n) });
+      this.roads.push({ cls, w, name, pts: readPts(n) });
     }
-    roads.sort((a, b) => b.cls - a.cls);
-    for (const r of roads) {
-      const y = r.cls === 11 ? 0.03 : 0.05 + (12 - r.cls) * 0.008;
-      for (let i = 0; i + 3 < r.pts.length; i += 2) {
-        const ax = r.pts[i], az = r.pts[i + 1], bx = r.pts[i + 2], bz = r.pts[i + 3];
-        builderFor((ax + bx) / 2, (az + bz) / 2).ribbon(ax, az, bx, bz, r.w, y, ROAD_COLORS[r.cls] ?? 0x5d5a57);
-        if (r.cls <= 9) this.indexRoad({ ax, az, bx, bz, name: r.name, cls: r.cls });
-      }
-    }
-
-    // Areas
     const na = v.getUint32(o, true);
     o += 4;
     for (let i = 0; i < na; i++) {
       const kind = v.getUint8(o);
       const n = v.getUint16(o + 1, true);
       o += 3;
-      const pts = readPts(n);
-      const c = centroid(pts);
-      builderFor(c.x, c.z).flat(pts, kind === 1 ? 0.025 : 0.02, AREA_COLORS[kind] ?? 0x999999);
+      this.areas.push({ kind, pts: readPts(n) });
     }
 
-    const mat = new THREE.MeshBasicMaterial({ vertexColors: true, fog: true });
+    for (const r of this.roads) {
+      if (r.cls > 9) continue;
+      for (let i = 0; i + 3 < r.pts.length; i += 2) {
+        this.indexRoad({ ax: r.pts[i], az: r.pts[i + 1], bx: r.pts[i + 2], bz: r.pts[i + 3], w: r.w, name: r.name, cls: r.cls });
+      }
+    }
+    for (const b of buildings) this.indexBuilding(b.pts);
+
+    // ---- build chunk geometry ----
+    const chunkBuilders = new Map<string, Builder>();
+    const builderFor = (x: number, z: number) => {
+      const key = `${Math.floor(x / CHUNK)},${Math.floor(z / CHUNK)}`;
+      let b = chunkBuilders.get(key);
+      if (!b) chunkBuilders.set(key, (b = new Builder()));
+      return b;
+    };
+
+    buildings.forEach((b, i) => {
+      const c = centroid(b.pts);
+      builderFor(c.x, c.z).building(b.pts, b.h, i, (mx, mz) => this.isShopFront(mx, mz, i));
+    });
+
+    // Roads in class order so big roads sit on top of small ones.
+    const ordered = [...this.roads].sort((a, b) => b.cls - a.cls);
+    for (const r of ordered) {
+      const y = r.cls === 11 ? 0.03 : 0.05 + (12 - r.cls) * 0.008;
+      const code = r.cls <= 4 ? FACADE_ROAD_LINED : r.cls <= 7 ? FACADE_ROAD : FACADE_PLAIN;
+      let u = 0;
+      for (let i = 0; i + 3 < r.pts.length; i += 2) {
+        const ax = r.pts[i], az = r.pts[i + 1], bx = r.pts[i + 2], bz = r.pts[i + 3];
+        const len = Math.hypot(bx - ax, bz - az);
+        const bld = builderFor((ax + bx) / 2, (az + bz) / 2);
+        bld.ribbon(ax, az, bx, bz, r.w, y, ROAD_COLORS[r.cls] ?? 0x5d5a57, code, u);
+        if (r.cls <= MAJOR) {
+          // Lagos black-and-yellow kerbs on both edges.
+          for (const side of [-1, 1]) bld.kerb(ax, az, bx, bz, (r.w / 2) * side, y + 0.006, u);
+        }
+        u += len;
+      }
+    }
+
+    for (const a of this.areas) {
+      const c = centroid(a.pts);
+      builderFor(c.x, c.z).flat(a.pts, a.kind === 1 ? 0.025 : 0.02, AREA_COLORS[a.kind] ?? 0x999999);
+    }
+
+    // Static street furniture, deterministic so every player sees the same city.
+    for (const p of placeProps(this)) builderFor(p.x, p.z).stamp(TEMPLATES[p.t], p.x, p.z, p.rot, p.s, p.y ?? 0);
+
+    const mat = createWorldMaterial();
     for (const b of chunkBuilders.values()) {
       const mesh = new THREE.Mesh(b.geometry(), mat);
       mesh.matrixAutoUpdate = false;
@@ -136,12 +176,12 @@ export class World {
       this.group.add(mesh);
     }
 
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(this.meta.half.x * 2 + 2000, this.meta.half.z * 2 + 2000),
-      new THREE.MeshBasicMaterial({ color: GROUND, fog: true }),
-    );
-    ground.rotation.x = -Math.PI / 2;
-    this.group.add(ground);
+    const gw = this.meta.half.x * 2 + 2000, gd = this.meta.half.z * 2 + 2000;
+    const ground = new Builder();
+    ground.groundQuad(gw / 2, gd / 2, GROUND);
+    const groundMesh = new THREE.Mesh(ground.geometry(), mat);
+    groundMesh.renderOrder = -1;
+    this.group.add(groundMesh);
   }
 
   /** Hide chunks beyond the fog so the GPU skips them entirely. */
@@ -187,6 +227,16 @@ export class World {
     return !!list?.some((p) => pointInPoly(p, x, z));
   }
 
+  /** Distance from (x, z) to the nearest road edge (negative = on the road). */
+  roadClearance(x: number, z: number, maxCls = 9): number {
+    let best = Infinity;
+    for (const s of this.roadGrid.get(cellKey(x, z)) ?? []) {
+      if (s.cls > maxCls) continue;
+      best = Math.min(best, Math.sqrt(segDist2(x, z, s.ax, s.az, s.bx, s.bz)) - s.w / 2);
+    }
+    return best;
+  }
+
   /** Nearest open spot to (x, z), preferring a point on a nearby street. */
   findOpen(x: number, z: number): { x: number; z: number } {
     let best = 80 * 80;
@@ -194,7 +244,7 @@ export class World {
     const cx = Math.floor(x / GRID), cz = Math.floor(z / GRID);
     for (let i = -4; i <= 4; i++) {
       for (let j = -4; j <= 4; j++) {
-        for (const s of this.roads.get(key(cx + i, cz + j)) ?? []) {
+        for (const s of this.roadGrid.get(key(cx + i, cz + j)) ?? []) {
           if (s.cls > 7) continue; // skip footpaths and tracks
           const mx = (s.ax + s.bx) / 2, mz = (s.az + s.bz) / 2;
           const d2 = (mx - x) ** 2 + (mz - z) ** 2;
@@ -227,7 +277,7 @@ export class World {
     const cx = Math.floor(x / GRID), cz = Math.floor(z / GRID);
     for (let i = -2; i <= 2; i++) {
       for (let j = -2; j <= 2; j++) {
-        for (const s of this.roads.get(key(cx + i, cz + j)) ?? []) {
+        for (const s of this.roadGrid.get(key(cx + i, cz + j)) ?? []) {
           if (s.name === 0xffff) continue;
           const d2 = segDist2(x, z, s.ax, s.az, s.bx, s.bz);
           if (d2 < best) {
@@ -238,6 +288,19 @@ export class World {
       }
     }
     return name >= 0 ? this.meta.names[name] : null;
+  }
+
+  /** Is the wall whose midpoint is (x, z) a street-facing shopfront? */
+  private isShopFront(x: number, z: number, seed: number): boolean {
+    for (const s of this.roadGrid.get(cellKey(x, z)) ?? []) {
+      if (s.cls > 6) continue;
+      // Lagos frontages often sit behind a forecourt or gutter, so allow a deep setback.
+      const near = Math.sqrt(segDist2(x, z, s.ax, s.az, s.bx, s.bz)) - s.w / 2 < 15;
+      if (!near) continue;
+      // Every frontage on a big road trades; about a third on residential streets.
+      if (s.cls <= MAJOR || hash(seed + 11) % 3 === 0) return true;
+    }
+    return false;
   }
 
   private indexBuilding(pts: Float32Array) {
@@ -276,45 +339,59 @@ export class World {
     }
   }
 
+  /** Index a road segment in every grid cell its (padded) bounding box covers. */
   private indexRoad(s: RoadSeg) {
-    const k = key(Math.floor((s.ax + s.bx) / 2 / GRID), Math.floor((s.az + s.bz) / 2 / GRID));
-    let l = this.roads.get(k);
-    if (!l) this.roads.set(k, (l = []));
-    l.push(s);
+    const pad = s.w / 2 + 8;
+    for (let gx = Math.floor((Math.min(s.ax, s.bx) - pad) / GRID); gx <= Math.floor((Math.max(s.ax, s.bx) + pad) / GRID); gx++) {
+      for (let gz = Math.floor((Math.min(s.az, s.bz) - pad) / GRID); gz <= Math.floor((Math.max(s.az, s.bz) + pad) / GRID); gz++) {
+        const k = key(gx, gz);
+        let l = this.roadGrid.get(k);
+        if (!l) this.roadGrid.set(k, (l = []));
+        l.push(s);
+      }
+    }
   }
 }
 
-/** Accumulates positions + colours for one chunk. */
+/** Accumulates positions, colours and facade data for one chunk. */
 class Builder {
   pos: number[] = [];
   col: number[] = [];
+  fac: number[] = [];
   idx: number[] = [];
   private c = new THREE.Color();
 
-  private vert(x: number, y: number, z: number, color: THREE.Color, shade: number) {
+  private vert(x: number, y: number, z: number, color: THREE.Color, shade: number, u = 0, fy = 0, code = FACADE_PLAIN, light = 1) {
     this.pos.push(x, y, z);
     this.col.push(color.r * shade, color.g * shade, color.b * shade);
+    this.fac.push(u, fy, code, light);
     return this.pos.length / 3 - 1;
   }
 
-  building(pts: Float32Array, h: number, seed: number) {
+  building(pts: Float32Array, h: number, seed: number, shopFront: (mx: number, mz: number) => boolean) {
     const n = pts.length / 2;
-    const wall = this.c.setHex(WALLS[hash(seed) % WALLS.length]).clone();
+    const wall = new THREE.Color(WALLS[hash(seed) % WALLS.length]);
     const roof = new THREE.Color(h > 9 ? FLAT_ROOFS[hash(seed + 7) % FLAT_ROOFS.length] : ZINC_ROOFS[hash(seed + 3) % ZINC_ROOFS.length]);
+    const facadeSeed = (hash(seed + 5) % 997) / 1000;
+    let u = 0;
     for (let i = 0; i < n; i++) {
       const ax = pts[i * 2], az = pts[i * 2 + 1];
       const bx = pts[((i + 1) % n) * 2], bz = pts[((i + 1) % n) * 2 + 1];
-      // Outward normal for a ring that is clockwise when viewed from above (+y).
+      const len = Math.hypot(bx - ax, bz - az);
+      // Outward normal for the ring winding the bake produces.
       let nx = bz - az, nz = -(bx - ax);
-      const len = Math.hypot(nx, nz) || 1;
-      nx /= len;
-      nz /= len;
+      const nl = Math.hypot(nx, nz) || 1;
+      nx /= nl;
+      nz /= nl;
       const lit = 0.62 + 0.38 * Math.max(0, nx * SUN.x + nz * SUN.z);
-      const a = this.vert(ax, 0, az, wall, lit * 0.72);
-      const b = this.vert(bx, 0, bz, wall, lit * 0.72);
-      const c = this.vert(bx, h, bz, wall, lit);
-      const d = this.vert(ax, h, az, wall, lit);
+      // Facade code: seed in [0,1); +2 marks a ground-floor shopfront wall.
+      const code = facadeSeed + (len > 2.5 && shopFront((ax + bx) / 2, (az + bz) / 2) ? 2 : 0);
+      const a = this.vert(ax, 0, az, wall, 1, u, 0, code, lit);
+      const b = this.vert(bx, 0, bz, wall, 1, u + len, 0, code, lit);
+      const c = this.vert(bx, h, bz, wall, 1, u + len, h, code, lit);
+      const d = this.vert(ax, h, az, wall, 1, u, h, code, lit);
       this.idx.push(a, c, b, a, d, c);
+      u += len;
     }
     const contour: THREE.Vector2[] = [];
     for (let i = 0; i < n; i++) contour.push(new THREE.Vector2(pts[i * 2], pts[i * 2 + 1]));
@@ -324,18 +401,35 @@ class Builder {
     for (const t of tris) this.idx.push(base + t[0], base + t[2], base + t[1]);
   }
 
-  ribbon(ax: number, az: number, bx: number, bz: number, w: number, y: number, hex: number) {
+  ribbon(ax: number, az: number, bx: number, bz: number, w: number, y: number, hex: number, code: number, u0: number) {
     const dx = bx - ax, dz = bz - az;
     const len = Math.hypot(dx, dz) || 1;
     const px = (-dz / len) * (w / 2), pz = (dx / len) * (w / 2);
     // Extend slightly along the segment so consecutive pieces overlap at bends.
-    const ex = (dx / len) * (w / 2) * 0.9, ez = (dz / len) * (w / 2) * 0.9;
+    const e = Math.min((w / 2) * 0.9, len * 0.5);
+    const ex = (dx / len) * e, ez = (dz / len) * e;
     const c = this.c.setHex(hex);
-    const a = this.vert(ax + px - ex, y, az + pz - ez, c, 1);
-    const b = this.vert(ax - px - ex, y, az - pz - ez, c, 1);
-    const d = this.vert(bx - px + ex, y, bz - pz + ez, c, 1);
-    const e = this.vert(bx + px + ex, y, bz + pz + ez, c, 1);
-    this.idx.push(a, b, d, a, d, e, a, d, b, a, e, d);
+    // facade.y carries the lateral position (-1..1) so the shader can draw a centre line.
+    const a = this.vert(ax + px - ex, y, az + pz - ez, c, 1, u0 - e, 1, code);
+    const b = this.vert(ax - px - ex, y, az - pz - ez, c, 1, u0 - e, -1, code);
+    const d = this.vert(bx - px + ex, y, bz - pz + ez, c, 1, u0 + len + e, -1, code);
+    const f = this.vert(bx + px + ex, y, bz + pz + ez, c, 1, u0 + len + e, 1, code);
+    this.idx.push(a, b, d, a, d, f, a, d, b, a, f, d);
+  }
+
+  /** Thin painted kerb strip along one road edge (offset > 0 = left of travel). */
+  kerb(ax: number, az: number, bx: number, bz: number, offset: number, y: number, u0: number) {
+    const dx = bx - ax, dz = bz - az;
+    const len = Math.hypot(dx, dz) || 1;
+    const nx = -dz / len, nz = dx / len;
+    const w = 0.35;
+    const o1 = offset, o2 = offset + Math.sign(offset) * w;
+    const c = this.c.setHex(0xffffff);
+    const a = this.vert(ax + nx * o1, y, az + nz * o1, c, 1, u0, 0, FACADE_KERB);
+    const b = this.vert(ax + nx * o2, y, az + nz * o2, c, 1, u0, 0, FACADE_KERB);
+    const d = this.vert(bx + nx * o2, y, bz + nz * o2, c, 1, u0 + len, 0, FACADE_KERB);
+    const f = this.vert(bx + nx * o1, y, bz + nz * o1, c, 1, u0 + len, 0, FACADE_KERB);
+    this.idx.push(a, b, d, a, d, f, a, d, b, a, f, d);
   }
 
   flat(pts: Float32Array, y: number, hex: number) {
@@ -349,10 +443,34 @@ class Builder {
     for (const t of tris) this.idx.push(base + t[0], base + t[1], base + t[2], base + t[0], base + t[2], base + t[1]);
   }
 
+  groundQuad(hx: number, hz: number, hex: number) {
+    const c = this.c.setHex(hex);
+    const a = this.vert(-hx, 0, -hz, c, 1, 0, 0, FACADE_GROUND);
+    const b = this.vert(hx, 0, -hz, c, 1, 0, 0, FACADE_GROUND);
+    const d = this.vert(hx, 0, hz, c, 1, 0, 0, FACADE_GROUND);
+    const f = this.vert(-hx, 0, hz, c, 1, 0, 0, FACADE_GROUND);
+    this.idx.push(a, f, d, a, d, b);
+  }
+
+  /** Stamp a prop template (non-indexed triangles with baked colours). */
+  stamp(t: Template, x: number, z: number, rot: number, s: number, y = 0) {
+    const cos = Math.cos(rot), sin = Math.sin(rot);
+    const base = this.pos.length / 3;
+    const n = t.pos.length / 3;
+    for (let i = 0; i < n; i++) {
+      const px = t.pos[i * 3] * s, py = t.pos[i * 3 + 1] * s, pz = t.pos[i * 3 + 2] * s;
+      this.pos.push(x + px * cos + pz * sin, py + y, z - px * sin + pz * cos);
+      this.col.push(t.col[i * 3], t.col[i * 3 + 1], t.col[i * 3 + 2]);
+      this.fac.push(0, 0, FACADE_PLAIN, 1);
+      this.idx.push(base + i);
+    }
+  }
+
   geometry(): THREE.BufferGeometry {
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.Float32BufferAttribute(this.pos, 3));
     g.setAttribute("color", new THREE.Float32BufferAttribute(this.col, 3));
+    g.setAttribute("facade", new THREE.Float32BufferAttribute(this.fac, 4));
     const nverts = this.pos.length / 3;
     g.setIndex(nverts > 65535 ? new THREE.Uint32BufferAttribute(this.idx, 1) : new THREE.Uint16BufferAttribute(this.idx, 1));
     g.computeBoundingSphere();
@@ -384,7 +502,7 @@ async function fetchWithProgress(url: string, onProgress?: (p: number) => void):
   return out.buffer;
 }
 
-function centroid(pts: Float32Array) {
+export function centroid(pts: Float32Array) {
   let x = 0, z = 0;
   const n = pts.length / 2;
   for (let i = 0; i < n; i++) {
@@ -394,7 +512,7 @@ function centroid(pts: Float32Array) {
   return { x: x / n, z: z / n };
 }
 
-function pointInPoly(p: Float32Array, x: number, z: number): boolean {
+export function pointInPoly(p: Float32Array, x: number, z: number): boolean {
   let inside = false;
   const n = p.length / 2;
   for (let i = 0, j = n - 1; i < n; j = i++) {
@@ -413,9 +531,8 @@ function segDist2(x: number, z: number, ax: number, az: number, bx: number, bz: 
 const key = (gx: number, gz: number) => (gx + 1000) * 4000 + (gz + 1000);
 const cellKey = (x: number, z: number) => key(Math.floor(x / GRID), Math.floor(z / GRID));
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
-const hash = (n: number) => {
+export const hash = (n: number) => {
   let h = Math.imul(n, 2654435761) >>> 0;
   h ^= h >>> 15;
   return h >>> 0; // XOR yields a signed int; keep it unsigned so % indexes stay positive
-
 };

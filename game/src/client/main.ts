@@ -1,7 +1,9 @@
 import * as THREE from "three";
+import { StreetAudio } from "./audio";
 import { Avatar } from "./avatar";
 import { Input } from "./input";
 import { Net } from "./net";
+import { Traffic } from "./traffic";
 import { World, type Place } from "./world";
 import { FLAG_MOVING, FLAG_RUNNING, type MoveState, type PlayerInfo } from "../shared/protocol";
 
@@ -45,6 +47,9 @@ addEventListener("resize", () => {
 
 const world = new World();
 scene.add(world.group);
+scene.add(makeSky());
+let traffic: Traffic | null = null;
+const audio = new StreetAudio();
 
 const me = {
   pos: new THREE.Vector3(),
@@ -162,6 +167,12 @@ world
       enterBtn.textContent = "Open in Chrome to play";
       return;
     }
+    traffic = new Traffic(world, {
+      honk(x, z, kind) {
+        audio.horn(x - me.pos.x, z - me.pos.z, me.camYaw, kind);
+      },
+    }, isTouch ? { vehicles: 24, walkers: 30 } : { vehicles: 40, walkers: 60 });
+    scene.add(traffic.group);
     enterBtn.disabled = false;
     enterBtn.textContent = meetId ? "Join your padi in Yaba" : "Enter Yaba";
     const spot = world.findOpen(world.meta.spawn.x + rand(-6, 6), world.meta.spawn.z + rand(-6, 6));
@@ -179,6 +190,7 @@ enterBtn.addEventListener("click", () => {
   me.bio = $<HTMLInputElement>("bio").value.trim();
   me.avatar = new Avatar(0x1f9d55, Math.floor(Math.random() * 1000));
   scene.add(me.avatar.root);
+  audio.start();
   $("join").hidden = true;
   $("hud").hidden = false;
   $("chat").hidden = false;
@@ -246,6 +258,11 @@ $("card-wave").addEventListener("click", () => {
   if (cardFor) net.send({ t: "chat", text: `👋🏾 ${cardFor.info.name}!` });
   $("card").hidden = true;
   cardFor = null;
+});
+
+$("mute").addEventListener("click", () => {
+  audio.setMuted(!audio.muted);
+  $("mute").textContent = audio.muted ? "🔇" : "🔊";
 });
 
 // --------------------------------------------------------------- invite ----
@@ -447,6 +464,10 @@ function frame(now: number) {
   }
   for (const r of remotes.values()) updateRemote(r, now, dt);
 
+  if (traffic) {
+    traffic.update(dt, me.pos.x, me.pos.z);
+    audio.traffic(traffic.nearbyVehicles);
+  }
   placeCamera(dt);
   world.cull(me.pos.x, me.pos.z, fogFar);
   renderer.render(scene, camera);
@@ -520,6 +541,24 @@ function adaptQuality(f: number) {
 }
 
 // ---------------------------------------------------------------- utils ----
+
+/** Harmattan sky: hazy horizon fading to a pale blue zenith. Follows the camera. */
+function makeSky(): THREE.Mesh {
+  const geo = new THREE.SphereGeometry(520, 16, 10);
+  const pos = geo.getAttribute("position");
+  const cols: number[] = [];
+  const horizon = new THREE.Color(HAZE), zenith = new THREE.Color(0xa9c3d8), c = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const k = Math.max(0, pos.getY(i) / 520);
+    c.copy(horizon).lerp(zenith, Math.pow(k, 0.6));
+    cols.push(c.r, c.g, c.b);
+  }
+  geo.setAttribute("color", new THREE.Float32BufferAttribute(cols, 3));
+  const sky = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false }));
+  sky.renderOrder = -2;
+  sky.onBeforeRender = (_r, _s, cam) => sky.position.copy(cam.position);
+  return sky;
+}
 
 function updateOnline() {
   $("online").textContent = `● ${online} in Yaba`;
