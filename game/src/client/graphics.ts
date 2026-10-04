@@ -1,5 +1,6 @@
 import * as THREE from "three/webgpu";
 import { builtinAOContext, mrt, normalView, pass, screenUV } from "three/tsl";
+import { nightUniform } from "./facade";
 import { ao } from "three/addons/tsl/display/GTAONode.js";
 import { bloom } from "three/addons/tsl/display/BloomNode.js";
 import { smaa } from "three/addons/tsl/display/SMAANode.js";
@@ -11,10 +12,13 @@ import { SkyMesh } from "three/addons/objects/SkyMesh.js";
 
 export type Quality = "ultra" | "high" | "medium";
 
-/** Hazy late-afternoon Lagos: warm low sun, dusty horizon. */
+/** Harmattan haze by day, deep blue-grey city haze by night. */
 const HAZE = new THREE.Color(0xc9b99c);
-const SUN_ELEVATION = 38; // degrees
-const SUN_AZIMUTH = 235; // degrees from north, clockwise (south-west)
+const DUSK = new THREE.Color(0xc98e62);
+const NIGHT = new THREE.Color(0x2a3248);
+/** Lagos sits near the equator: sunrise ~06:45, sunset ~18:45 all year. */
+const SUNRISE = 6.75;
+const DAY_LENGTH = 12;
 
 export class Graphics {
   renderer: THREE.WebGPURenderer;
@@ -38,17 +42,11 @@ export class Graphics {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.backend = "pending";
 
-    const phi = THREE.MathUtils.degToRad(90 - SUN_ELEVATION);
-    const theta = THREE.MathUtils.degToRad(SUN_AZIMUTH);
-    // World axes: x east, z south. Azimuth measured clockwise from north (-z).
-    this.sunDir.set(Math.sin(theta) * Math.sin(phi), Math.cos(phi), -Math.cos(theta) * Math.sin(phi));
-
     this.sky.scale.setScalar(4500);
     this.sky.turbidity.value = 6; // harmattan dust
     this.sky.rayleigh.value = 1.1;
     this.sky.mieCoefficient.value = 0.012;
     this.sky.mieDirectionalG.value = 0.82;
-    this.sky.sunPosition.value.copy(this.sunDir);
     this.scene.add(this.sky);
 
     this.scene.fog = new THREE.Fog(HAZE, 180, this.fogFar);
@@ -117,6 +115,33 @@ export class Graphics {
 
   render() {
     this.pipeline.render();
+  }
+
+  /** Hour of day (0..24, Lagos time). Drives sun, sky, light, fog and night glow. */
+  hours = 15;
+  setTime(hours: number) {
+    this.hours = ((hours % 24) + 24) % 24;
+    const t = (this.hours - SUNRISE) / DAY_LENGTH; // 0 at sunrise, 1 at sunset
+    const elev = 72 * Math.sin(Math.PI * t); // degrees; negative at night
+    const az = THREE.MathUtils.degToRad(90 + 180 * Math.min(1.2, Math.max(-0.2, t))); // east -> west via south... north of equator: via south
+    const phi = THREE.MathUtils.degToRad(90 - Math.max(-12, elev));
+    // World axes: x east, z south. Azimuth clockwise from north (-z).
+    this.sunDir.set(Math.sin(az) * Math.sin(phi), Math.cos(phi), -Math.cos(az) * Math.sin(phi));
+    this.sky.sunPosition.value.copy(this.sunDir);
+
+    const day = THREE.MathUtils.smoothstep(elev, -6, 10); // 0 night .. 1 day
+    const golden = Math.max(0, 1 - Math.abs(elev - 6) / 14) * day; // low sun glow
+    nightUniform.value = 1 - THREE.MathUtils.smoothstep(elev, -8, 4);
+
+    this.sun.visible = elev > -2;
+    this.sun.intensity = 2.4 * THREE.MathUtils.smoothstep(elev, -2, 14);
+    this.sun.color.setHex(0xffe7c4).lerp(new THREE.Color(0xff9a52), golden);
+    this.hemi.intensity = 0.5 + 0.45 * day; // moonlight + city glow at night
+    this.hemi.color.setHex(0xd6e0ea).lerp(new THREE.Color(0x4a5f8c), 1 - day);
+    this.hemi.groundColor.setHex(0x9a7f62).lerp(new THREE.Color(0x3a2a1c), 1 - day);
+    const fog = (this.scene.fog as THREE.Fog).color;
+    fog.copy(NIGHT).lerp(HAZE, day).lerp(DUSK, golden * 0.7);
+    this.renderer.toneMappingExposure = 0.95 + (1 - day) * 0.6;
   }
 
   setFogFar(far: number) {

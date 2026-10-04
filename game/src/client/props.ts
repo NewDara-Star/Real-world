@@ -10,18 +10,25 @@ export interface Template {
   pos: Float32Array;
   col: Float32Array;
   nrm: Float32Array;
+  /** Optional per-vertex facade code (e.g. glowing lamp heads); plain if absent. */
+  code?: Float32Array;
 }
 
-type Part = [THREE.BufferGeometry, number];
+type Part = [THREE.BufferGeometry, number] | [THREE.BufferGeometry, number, number];
 
 /** Merge coloured parts into one template (flat-shaded normals; lit by the real sun). */
 export function makeTemplate(parts: Part[]): Template {
   const pos: number[] = [];
   const col: number[] = [];
   const nrm: number[] = [];
+  const codes: number[] = [];
+  let anyCode = false;
   const n = new THREE.Vector3();
   const c = new THREE.Color();
-  for (const [geo, hex] of parts) {
+  for (const part of parts) {
+    const [geo, hex] = part;
+    const code = part[2] ?? -1;
+    if (part[2] !== undefined) anyCode = true;
     const g = geo.index ? geo.toNonIndexed() : geo;
     // Keep smooth normals that rounded shapes (spheres, detail>0 icosahedra) bring.
     if (!g.getAttribute("normal")) g.computeVertexNormals();
@@ -33,9 +40,10 @@ export function makeTemplate(parts: Part[]): Template {
       n.fromBufferAttribute(nm, i);
       nrm.push(n.x, n.y, n.z);
       col.push(c.r, c.g, c.b);
+      codes.push(code);
     }
   }
-  return { pos: new Float32Array(pos), col: new Float32Array(col), nrm: new Float32Array(nrm) };
+  return { pos: new Float32Array(pos), col: new Float32Array(col), nrm: new Float32Array(nrm), code: anyCode ? new Float32Array(codes) : undefined };
 }
 
 export function templateGeometry(t: Template): THREE.BufferGeometry {
@@ -177,7 +185,18 @@ function rebar(): Template {
   return makeTemplate(parts);
 }
 
+/** Street lamp: galvanised pole, curved arm, sodium head that glows at night (code -8). */
+function lamp(): Template {
+  return makeTemplate([
+    [new THREE.CylinderGeometry(0.07, 0.11, 7.5, 6).translate(0, 3.75, 0), 0x8b9096],
+    [box(0.06, 0.06, 1.6, 0, 7.35, 0.75), 0x8b9096],
+    [box(0.36, 0.12, 0.6, 0, 7.2, 1.5), 0x5c6166],
+    [box(0.3, 0.04, 0.5, 0, 7.15, 1.5), 0xffd9a0, -8],
+  ]);
+}
+
 export const TEMPLATES = {
+  lamp: lamp(),
   almond: almondTree(),
   tank: waterTank(),
   stairhead: stairHead(),
@@ -229,7 +248,8 @@ export function placeProps(world: World): PropPlacement[] {
     if (r.cls < 2 || r.cls > 7) continue;
     const pts = r.pts;
     let poleLast: { x: number; z: number } | null = null;
-    let sinceTree = rand() * 20, sincePole = rand() * 35, sinceKiosk = rand() * 80;
+    let sinceTree = rand() * 20, sincePole = rand() * 35, sinceKiosk = rand() * 80, sinceLamp = rand() * 30;
+    let lampSide = 1;
     for (let i = 0; i + 3 < pts.length; i += 2) {
       const ax = pts[i], az = pts[i + 1], bx = pts[i + 2], bz = pts[i + 3];
       const len = Math.hypot(bx - ax, bz - az);
@@ -242,6 +262,18 @@ export function placeProps(world: World): PropPlacement[] {
         sinceTree += 3;
         sincePole += 3;
         sinceKiosk += 3;
+        sinceLamp += 3;
+        // Streetlights on the main roads, alternating sides, arm over the road.
+        if (r.cls <= 5 && sinceLamp > 32) {
+          const off = r.w / 2 + 0.6;
+          const tx = px + nx * off * lampSide, tz = pz + nz * off * lampSide;
+          if (free(tx, tz, 0.3)) {
+            // Template arm points along +z; face it toward the road centre.
+            out.push({ t: "lamp", x: tx, z: tz, rot: Math.atan2(-nx * lampSide, -nz * lampSide), s: 1 });
+            sinceLamp = 0;
+            lampSide = -lampSide;
+          }
+        }
         // Trees: denser on quiet streets, sparse on big roads.
         const treeGap = r.cls >= 6 ? 16 : 26;
         if (sinceTree > treeGap && rand() < 0.5) {

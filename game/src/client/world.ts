@@ -63,6 +63,8 @@ export class World {
   meta!: WorldMeta;
   group = new THREE.Group();
   roads: Road[] = [];
+  /** Flat [x, z, x, z, ...] of streetlight pools. */
+  lamps: number[] = [];
   areas: { kind: number; pts: Float32Array }[] = [];
   private chunks: THREE.Mesh[] = [];
   private edges = new Map<number, number[]>(); // grid cell -> flat [ax,az,bx,bz,...] wall edges
@@ -165,7 +167,11 @@ export class World {
     }
 
     // Static street furniture, deterministic so every player sees the same city.
-    for (const p of placeProps(this)) builderFor(p.x, p.z).stamp(TEMPLATES[p.t], p.x, p.z, p.rot, p.s, p.y ?? 0);
+    for (const p of placeProps(this)) {
+      builderFor(p.x, p.z).stamp(TEMPLATES[p.t], p.x, p.z, p.rot, p.s, p.y ?? 0);
+      // Remember where each lamp's light lands (the head hangs 1.5 m out on its arm).
+      if (p.t === "lamp") this.lamps.push(p.x + Math.sin(p.rot) * 1.5, p.z + Math.cos(p.rot) * 1.5);
+    }
 
     const mat = createWorldMaterial();
     for (const b of chunkBuilders.values()) {
@@ -682,7 +688,7 @@ class Builder {
       this.col.push(t.col[i * 3], t.col[i * 3 + 1], t.col[i * 3 + 2]);
       const nx = t.nrm[i * 3], ny = t.nrm[i * 3 + 1], nz = t.nrm[i * 3 + 2];
       this.nrm.push(nx * cos + nz * sin, ny, -nx * sin + nz * cos);
-      this.fac.push(0, 0, FACADE_PLAIN, 1);
+      this.fac.push(0, 0, t.code ? t.code[i] : FACADE_PLAIN, 1);
       this.idx.push(base + i);
     }
   }

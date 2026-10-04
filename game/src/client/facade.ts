@@ -1,5 +1,5 @@
 import * as THREE from "three/webgpu";
-import { Fn, If, abs, attribute, dot, float, floor, fract, fwidth, max, min, mix, mod, positionWorld, select, sin, smoothstep, step, vec2, vec3, vec4 } from "three/tsl";
+import { Fn, If, abs, attribute, dot, float, floor, fract, fwidth, max, min, mix, mod, positionWorld, select, sin, smoothstep, step, uniform, vec2, vec3, vec4 } from "three/tsl";
 
 // One shared PBR material for the whole city. Each vertex carries a `facade`
 // attribute (u, v, code, ao) and TSL paints detail procedurally, so there are
@@ -24,6 +24,12 @@ export const FACADE_ROAD = -4;
 export const FACADE_GROUND = -5;
 export const FACADE_ZINC = -6;
 export const FACADE_FLAT_ROOF = -7;
+export const FACADE_LAMP = -8;
+
+/** 0 = full day, 1 = full night. Set by Graphics.setTime. */
+export const nightUniform = uniform(0);
+/** Seconds since load; drives NEPA outages shifting around the city. */
+export const clockUniform = uniform(0);
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type N = any;
@@ -172,11 +178,46 @@ const surface = Fn(() => {
   return vec4(c.mul(fac.w), min(rough, 1));
 });
 
+/**
+ * Night glow: lit windows and open shops, NEPA-aware, plus streetlight heads.
+ * Each ~140 m patch of the city has mains power or not, re-rolled every four
+ * minutes; without power only a few windows glow (generators and lanterns).
+ */
+const nightGlow = Fn(() => {
+  const fac = attribute("facade", "vec4");
+  const code = fac.z;
+  const glow = vec3(0).toVar();
+  If(code.greaterThanEqual(0), () => {
+    const u = fac.x;
+    const h = fac.y;
+    const seed = floor(fract(code).mul(1000).add(0.5)).div(1000);
+    const shop = step(1.5, code);
+    const fl = floor(h.div(3.2));
+    const fy = fract(h.div(3.2));
+    const bay = seed.mul(1.4).add(2.4);
+    const bi = floor(u.div(bay));
+    const bx = fract(u.div(bay));
+    const cell = floor(positionWorld.xz.div(140));
+    const power = step(0.32, fhash(cell.x.mul(17.1).add(cell.y.mul(31.7)).add(floor(clockUniform.div(240)).mul(7.3))));
+    const r = fhash(bi.mul(1.3).add(fl.mul(13)).add(seed.mul(71)));
+    const lit = mix(step(r, 0.12), step(r, 0.62), power);
+    const warm = mix(vec3(1.0, 0.78, 0.5), vec3(0.85, 0.95, 1.0), step(0.6, fhash(r.mul(9.1))));
+    const win = step(0.27, bx).mul(step(bx, 0.73)).mul(step(0.32, fy)).mul(step(fy, 0.8)).mul(float(1).sub(shop.mul(step(fl, 0.5))));
+    // Open shops spill light from inside the shutters.
+    const shopInside = shop.mul(step(fl, 0.5)).mul(step(fy, 0.78)).mul(step(0.06, bx)).mul(step(bx, 0.94)).mul(step(0.45, fhash(bi.add(seed.mul(37)))));
+    glow.assign(warm.mul(win.mul(lit).mul(mix(float(0.45), float(0.95), power))).add(vec3(1.0, 0.8, 0.5).mul(shopInside.mul(mix(float(0.2), float(0.8), power)))));
+  }).ElseIf(code.lessThan(-7.5).and(code.greaterThan(-8.5)), () => {
+    glow.assign(vec3(1.0, 0.72, 0.38).mul(5));
+  });
+  return glow.mul(nightUniform);
+});
+
 export function createWorldMaterial(): THREE.MeshStandardNodeMaterial {
   const mat = new THREE.MeshStandardNodeMaterial();
   const s = surface();
   mat.colorNode = s.xyz;
   mat.roughnessNode = s.w;
+  mat.emissiveNode = nightGlow();
   const code = attribute("facade", "vec4").z;
   mat.metalnessNode = select(code.lessThan(-5.5).and(code.greaterThan(-6.5)), float(0.55), float(0));
   return mat;

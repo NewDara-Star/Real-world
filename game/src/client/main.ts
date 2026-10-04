@@ -1,7 +1,8 @@
 import * as THREE from "three/webgpu";
 import { StreetAudio } from "./audio";
 import { Graphics, type Quality } from "./graphics";
-import { createVertexColorMaterial } from "./facade";
+import { clockUniform, createVertexColorMaterial } from "./facade";
+import { createLightPools } from "./nightfx";
 import { Avatar } from "./avatar";
 import { Input } from "./input";
 import { Net } from "./net";
@@ -40,6 +41,16 @@ const renderer = gfx.renderer;
 const scene = gfx.scene;
 const camera = gfx.camera;
 let fogFar = gfx.fogFar;
+
+// Clock: real Lagos time (WAT, UTC+1) unless ?time=HH[.MM] is given.
+// ?timescale=N speeds it up (60 = one game hour per real minute).
+const lagosNow = () => {
+  const d = new Date();
+  return (d.getUTCHours() + 1 + d.getUTCMinutes() / 60) % 24;
+};
+let gameHours = params.has("time") ? Number(params.get("time")) || 0 : lagosNow();
+const timeScale = Number(params.get("timescale")) || 1;
+gfx.setTime(gameHours);
 
 const world = new World();
 scene.add(world.group);
@@ -191,6 +202,7 @@ world
       },
     }, isTouch ? { vehicles: 24, walkers: 30 } : { vehicles: 40, walkers: 60 });
     scene.add(traffic.group);
+    scene.add(createLightPools(world.lamps));
     enterBtn.disabled = false;
     enterBtn.textContent = meetId ? "Join your padi in Yaba" : "Enter Yaba";
     const spot = world.findOpen(world.meta.spawn.x + rand(-6, 6), world.meta.spawn.z + rand(-6, 6));
@@ -278,6 +290,16 @@ $("card-wave").addEventListener("click", () => {
   if (cardFor) net.send({ t: "chat", text: `👋🏾 ${cardFor.info.name}!` });
   $("card").hidden = true;
   cardFor = null;
+});
+
+// Skip time: the clock pill or T jumps forward (try a Lagos night).
+const skipTime = (h: number) => {
+  gameHours = (gameHours + h) % 24;
+  gfx.setTime(gameHours);
+};
+$("clock").addEventListener("click", () => skipTime(3));
+addEventListener("keydown", (e) => {
+  if (document.activeElement !== chatInput && (e.key === "t" || e.key === "T")) skipTime(1);
 });
 
 $("mute").addEventListener("click", () => {
@@ -502,6 +524,10 @@ function frame(now: number) {
   }
   for (const r of remotes.values()) updateRemote(r, now, dt);
 
+  // Advance the clock (real time by default) and update light, sky and night glow.
+  gameHours = (gameHours + (dt * timeScale) / 3600) % 24;
+  clockUniform.value += dt;
+  gfx.setTime(gameHours);
   hornCooldown -= dt;
   crashCooldown -= dt;
   if (traffic) {
@@ -519,6 +545,8 @@ function frame(now: number) {
     hudTimer = 0.5;
     const street = world.streetAt(me.pos.x, me.pos.z);
     $("where").textContent = `📍 ${street ? `${street}, Yaba` : "Yaba"}`;
+    const hh = Math.floor(gameHours), mm = Math.floor((gameHours % 1) * 60);
+    $("clock").textContent = `${gameHours >= 6.5 && gameHours < 18.75 ? "☀️" : "🌙"} ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
   }
 
   fpsFrames++;
