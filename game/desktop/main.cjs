@@ -17,8 +17,8 @@ protocol.registerSchemesAsPrivileged([
   { scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
 ]);
 
-// WebGPU is on by default on recent macOS builds; this keeps it on for older GPUs.
-app.commandLine.appendSwitch("enable-unsafe-webgpu");
+// WebGPU is on by default in Electron's Chromium on macOS; just don't let
+// an older GPU blocklist turn it off.
 app.commandLine.appendSwitch("ignore-gpu-blocklist");
 
 function createWindow() {
