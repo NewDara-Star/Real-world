@@ -1,5 +1,6 @@
 import * as THREE from "three/webgpu";
-import { createWorldMaterial, FACADE_FLAT_ROOF, FACADE_GROUND, FACADE_KERB, FACADE_PLAIN, FACADE_ROAD, FACADE_ROAD_LINED, FACADE_ZINC } from "./facade";
+import { createWorldMaterial, FACADE_FLAT_ROOF, FACADE_GROUND, FACADE_KERB, FACADE_PLAIN, FACADE_ROAD, FACADE_ROAD_LINED, FACADE_TILE, FACADE_ZINC } from "./facade";
+import type { City } from "./cities";
 import { placeProps, TEMPLATES, type Template } from "./props";
 
 // Loads a baked world tile (see tools/bake/bake_world.py) and builds cheap
@@ -27,6 +28,8 @@ export interface WorldMeta {
 export interface Road {
   cls: number;
   w: number;
+  /** Speed limit in km/h (0 = none, e.g. rail/water). */
+  speed: number;
   name: number;
   pts: Float32Array;
 }
@@ -39,15 +42,13 @@ interface RoadSeg {
   w: number;
   name: number;
   cls: number;
+  speed: number;
 }
 
 const CHUNK = 200;
 const GRID = 20; // collision / query grid cell size (m)
 
 // Gidi palette: sun-faded mainland walls and rusty zinc / concrete roofs.
-const WALLS = [0xe9dcc0, 0xebbd92, 0xe6d27f, 0xa9c9d6, 0xb3d4b5, 0xf2ede2, 0xdc947a, 0xc4bcae, 0xd9b8d0, 0xe0c9a0];
-const ZINC_ROOFS = [0x8f6b50, 0xa6795a, 0x7c7f83, 0x6f5e50, 0x9a8f80];
-const FLAT_ROOFS = [0xbdb5a6, 0xa8a196, 0xcfc6b4];
 
 const ROAD_COLORS: Record<number, number> = {
   1: 0x6a6b70, 2: 0x6c6d72, 3: 0x6f7075, 4: 0x727377, 5: 0x78787a, 6: 0x817d79,
@@ -60,6 +61,8 @@ const GROUND = 0xc8b38c;
 const MAJOR = 5;
 
 export class World {
+  constructor(readonly city: City) {}
+
   meta!: WorldMeta;
   group = new THREE.Group();
   roads: Road[] = [];
@@ -82,7 +85,8 @@ export class World {
 
   private build(v: DataView) {
     const magic = String.fromCharCode(v.getUint8(0), v.getUint8(1), v.getUint8(2), v.getUint8(3));
-    if (magic !== "LGW1") throw new Error("bad world file");
+    if (magic !== "LGW1" && magic !== "LGW2") throw new Error("bad world file");
+    const hasSpeed = magic === "LGW2";
     let o = 4;
     const readPts = (n: number) => {
       const pts = new Float32Array(n * 2);
@@ -106,10 +110,11 @@ export class World {
     for (let i = 0; i < nr; i++) {
       const cls = v.getUint8(o);
       const w = v.getUint8(o + 1) / 2;
+      const speed = hasSpeed ? v.getUint8(o + 6) : 0;
       const name = v.getUint16(o + 2, true);
       const n = v.getUint16(o + 4, true);
-      o += 6;
-      this.roads.push({ cls, w, name, pts: readPts(n) });
+      o += hasSpeed ? 7 : 6;
+      this.roads.push({ cls, w, name, speed, pts: readPts(n) });
     }
     const na = v.getUint32(o, true);
     o += 4;
@@ -123,7 +128,7 @@ export class World {
     for (const r of this.roads) {
       if (r.cls > 9) continue;
       for (let i = 0; i + 3 < r.pts.length; i += 2) {
-        this.indexRoad({ ax: r.pts[i], az: r.pts[i + 1], bx: r.pts[i + 2], bz: r.pts[i + 3], w: r.w, name: r.name, cls: r.cls });
+        this.indexRoad({ ax: r.pts[i], az: r.pts[i + 1], bx: r.pts[i + 2], bz: r.pts[i + 3], w: r.w, name: r.name, cls: r.cls, speed: r.speed });
       }
     }
     for (const b of buildings) this.indexBuilding(b.pts);
@@ -133,7 +138,7 @@ export class World {
     const builderFor = (x: number, z: number) => {
       const key = `${Math.floor(x / CHUNK)},${Math.floor(z / CHUNK)}`;
       let b = chunkBuilders.get(key);
-      if (!b) chunkBuilders.set(key, (b = new Builder()));
+      if (!b) chunkBuilders.set(key, (b = new Builder(this.city)));
       return b;
     };
 
@@ -184,7 +189,7 @@ export class World {
     }
 
     const gw = this.meta.half.x * 2 + 2000, gd = this.meta.half.z * 2 + 2000;
-    const ground = new Builder();
+    const ground = new Builder(this.city);
     ground.groundQuad(gw / 2, gd / 2, GROUND);
     const groundMesh = new THREE.Mesh(ground.geometry(), mat);
     groundMesh.renderOrder = -1;
@@ -286,7 +291,8 @@ export class World {
           const d2 = (px - x) ** 2 + (pz - z) ** 2;
           if (d2 >= best) continue;
           // Drive on the right: offset to the right of travel (right = (-dz, dx)).
-          const off = Math.max(1.4, s.w / 4);
+          // Keep to the city's side: right of travel is (-dz, dx), left is (dz, -dx).
+          const off = Math.max(1.4, s.w / 4) * (this.city.drive === "right" ? 1 : -1);
           const lx = px - (dz / len) * off, lz = pz + (dx / len) * off;
           if (!this.inBounds(lx, lz) || this.insideBuilding(lx, lz)) continue;
           best = d2;
@@ -307,6 +313,22 @@ export class World {
       }
     }
     return { x, z };
+  }
+
+  /** The road you're on: speed limit (km/h) and class of the nearest road within 12 m. */
+  roadAt(x: number, z: number): { speed: number; cls: number; name: string | null } | null {
+    let best = 12 * 12;
+    let hit: RoadSeg | null = null;
+    for (const s of this.roadGrid.get(cellKey(x, z)) ?? []) {
+      if (s.cls > 8) continue;
+      const d2 = segDist2(x, z, s.ax, s.az, s.bx, s.bz);
+      if (d2 < best) {
+        best = d2;
+        hit = s;
+      }
+    }
+    if (!hit) return null;
+    return { speed: hit.speed, cls: hit.cls, name: hit.name === 0xffff ? null : this.meta.names[hit.name] };
   }
 
   /** Name of the nearest named road within 40 m, for the location HUD. */
@@ -394,6 +416,8 @@ export class World {
 
 /** Accumulates positions, colours and facade data for one chunk. */
 class Builder {
+  constructor(private city: City) {}
+
   pos: number[] = [];
   col: number[] = [];
   nrm: number[] = [];
@@ -413,15 +437,20 @@ class Builder {
 
   building(pts: Float32Array, h: number, seed: number, shopFront: (mx: number, mz: number) => boolean) {
     const n = pts.length / 2;
-    const wall = new THREE.Color(WALLS[hash(seed) % WALLS.length]);
+    const city = this.city;
+    const wall = new THREE.Color(city.walls[hash(seed) % city.walls.length]);
     const facadeSeed = (hash(seed + 5) % 997) / 1000;
     const area = Math.abs(ringArea(pts));
     // Lagos roof logic: bungalows and most two-storey houses wear pitched zinc;
     // taller blocks have flat concrete roofs, often with a parapet and clutter.
     const r = (hash(seed + 13) % 1000) / 1000;
-    const kind: "zinc" | "flat" | "unfinished" =
-      area < 14 ? "flat" : h <= 4.6 ? "zinc" : h <= 7.2 ? (r < 0.65 ? "zinc" : "flat") : r < 0.22 ? "unfinished" : "flat";
-    const parapet = kind === "flat" && area > 30 ? 0.9 : 0;
+    // Dublin: pitched concrete-tile roofs on houses, flat roofs on big sheds,
+    // shops and apartment blocks.
+    const kind: "zinc" | "tile" | "flat" | "unfinished" =
+      city.style === "dublin"
+        ? area < 14 || area > 900 || h > 11 ? "flat" : "tile"
+        : area < 14 ? "flat" : h <= 4.6 ? "zinc" : h <= 7.2 ? (r < 0.65 ? "zinc" : "flat") : r < 0.22 ? "unfinished" : "flat";
+    const parapet = kind === "flat" && area > 30 ? (city.style === "dublin" ? 0.5 : 0.9) : 0;
     const wallTop = h + parapet;
 
     let u = 0;
@@ -445,17 +474,18 @@ class Builder {
       u += len;
     }
 
-    if (kind === "zinc") {
-      const zinc = new THREE.Color(ZINC_ROOFS[hash(seed + 3) % ZINC_ROOFS.length]);
-      this.hipRoof(pts, h, zinc);
+    if (kind === "zinc" || kind === "tile") {
+      const roofCol = new THREE.Color(city.roofs[hash(seed + 3) % city.roofs.length]);
+      // Irish roofs are steeper than Lagos zinc.
+      this.hipRoof(pts, h, roofCol, kind === "tile" ? FACADE_TILE : FACADE_ZINC, kind === "tile" ? 0.75 : 0.38);
       return;
     }
-    const slab = new THREE.Color(FLAT_ROOFS[hash(seed + 7) % FLAT_ROOFS.length]);
+    const slab = new THREE.Color(city.flatRoofs[hash(seed + 7) % city.flatRoofs.length]);
     const roofRing = parapet ? offsetRing(pts, -0.25) : pts;
     if (parapet) this.parapet(pts, roofRing, h, wallTop, wall);
     this.n = [0, 1, 0];
     this.fill(roofRing, h, slab, FACADE_FLAT_ROOF);
-    this.roofClutter(roofRing, h, seed, kind === "unfinished", area);
+    if (city.lagosLife) this.roofClutter(roofRing, h, seed, kind === "unfinished", area);
   }
 
   /** Fill a ring as a horizontal polygon at height y (upward facing). */
@@ -499,7 +529,7 @@ class Builder {
    * Low-pitched hip roof in corrugated zinc: a ridge along the footprint's
    * long axis, faces sloping to eaves that overhang the walls by 35 cm.
    */
-  private hipRoof(pts: Float32Array, h: number, color: THREE.Color) {
+  private hipRoof(pts: Float32Array, h: number, color: THREE.Color, code = FACADE_ZINC, pitch = 0.38) {
     const n = pts.length / 2;
     let cx = 0, cz = 0;
     for (let i = 0; i < n; i++) {
@@ -529,7 +559,7 @@ class Builder {
     }
     const half = (smax - smin) / 2;
     const mid = (smin + smax) / 2;
-    const rise = Math.min(3.2, Math.max(0.5, half * 0.38));
+    const rise = Math.min(4.5, Math.max(0.5, half * pitch));
     let t0 = tmin + half, t1 = tmax - half;
     if (t0 > t1) t0 = t1 = (tmin + tmax) / 2;
     const ridgeAt = (t: number) => [cx + ax * t + px * mid, h + rise, cz + az * t + pz * mid];
@@ -545,8 +575,8 @@ class Builder {
       // Project from the wall line, not the eave, so faces stay planar-ish.
       const ra = ridgeOf(pts[i * 2], pts[i * 2 + 1]);
       const rb = ridgeOf(pts[j * 2], pts[j * 2 + 1]);
-      this.tri([ea, eb, rb], color, FACADE_ZINC);
-      if (Math.hypot(ra[0] - rb[0], ra[2] - rb[2]) > 0.01) this.tri([ea, rb, ra], color, FACADE_ZINC);
+      this.tri([ea, eb, rb], color, code);
+      if (Math.hypot(ra[0] - rb[0], ra[2] - rb[2]) > 0.01) this.tri([ea, rb, ra], color, code);
       // Underside of the overhang, so the eaves read from street level.
       this.tri([ea, eb, [pts[j * 2], h - 0.05, pts[j * 2 + 1]]], color.clone().multiplyScalar(0.55), FACADE_PLAIN, false);
       this.tri([ea, [pts[j * 2], h - 0.05, pts[j * 2 + 1]], [pts[i * 2], h - 0.05, pts[i * 2 + 1]]], color.clone().multiplyScalar(0.55), FACADE_PLAIN, false);

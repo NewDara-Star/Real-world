@@ -25,6 +25,10 @@ export const FACADE_GROUND = -5;
 export const FACADE_ZINC = -6;
 export const FACADE_FLAT_ROOF = -7;
 export const FACADE_LAMP = -8;
+export const FACADE_TILE = -9;
+
+/** 0 = Lagos look, 1 = Dublin look (set once per city). */
+export const styleUniform = uniform(0);
 
 /** 0 = full day, 1 = full night. Set by Graphics.setTime. */
 export const nightUniform = uniform(0);
@@ -116,9 +120,13 @@ const surface = Fn(() => {
       // Glass or louvres behind burglary-proof bars.
       const louvre = mix(float(0.5), step(0.5, fract(fy.mul(14))), fine).mul(step(0.5, fhash(bi.add(fl.mul(7)).add(seed))));
       const glass = mix(vec3(0.1, 0.13, 0.16), vec3(0.3, 0.33, 0.34), louvre);
-      const bars = max(step(0.86, fract(bx.mul(8))), step(0.88, fract(fy.mul(6))));
+      // Lagos: burglary-proof bars. Dublin: white uPVC frame with a centre mullion.
+      const lagosBars = max(step(0.86, fract(bx.mul(8))), step(0.88, fract(fy.mul(6))));
+      const wx = bx.sub(0.27).div(0.46), wy = fy.sub(0.32).div(0.48);
+      const frame = max(max(step(wx, 0.07), step(0.93, wx)), max(max(step(wy, 0.08), step(0.92, wy)), step(abs(wx.sub(0.5)), 0.035)));
+      const bars = mix(lagosBars, frame, styleUniform);
       const barMix = mix(float(0.14), bars, fine);
-      const windowCol = mix(glass, vec3(0.36, 0.33, 0.3), barMix);
+      const windowCol = mix(glass, mix(vec3(0.36, 0.33, 0.3), vec3(0.93, 0.93, 0.9), styleUniform), barMix);
       const windowRough = mix(mix(float(0.08), float(0.5), louvre), float(0.6), barMix);
       // Lintel shadow above windows and a faint stain below them.
       const lintel = step(0.8, fy).mul(step(fy, 0.85)).mul(step(0.24, bx)).mul(step(bx, 0.76));
@@ -126,7 +134,9 @@ const surface = Fn(() => {
       const plain = float(1).sub(winOnly).sub(door);
       c.assign(c.mul(float(1).sub(lintel.mul(0.22).mul(plain)).sub(stain.mul(0.12).mul(plain))));
       c.assign(mix(c, windowCol, winOnly));
-      c.assign(mix(c, vec3(0.32, 0.21, 0.13), door));
+      // Dublin's painted front doors; Lagos hardwood.
+      const doorPaint = mix(vec3(0.32, 0.21, 0.13), signColor(bi.add(seed.mul(53))).mul(0.8), styleUniform);
+      c.assign(mix(c, doorPaint, door));
       rough.assign(mix(mix(rough, windowRough, winOnly), float(0.7), door));
     });
     // Grime and rain splash near the ground.
@@ -134,7 +144,8 @@ const surface = Fn(() => {
   })
     .ElseIf(code.lessThan(-1.5).and(code.greaterThan(-2.5)), () => {
       const kf = float(1).sub(smoothstep(0.15, 0.5, fwidth(fac.x)));
-      c.assign(mix(vec3(0.53, 0.45, 0.1), mix(vec3(0.96, 0.8, 0.1), vec3(0.09), step(0.5, fract(fac.x.div(1.2)))), kf));
+      const lagosKerb = mix(vec3(0.53, 0.45, 0.1), mix(vec3(0.96, 0.8, 0.1), vec3(0.09), step(0.5, fract(fac.x.div(1.2)))), kf);
+      c.assign(mix(lagosKerb, vec3(0.62, 0.62, 0.6), styleUniform));
       rough.assign(0.75);
     })
     .ElseIf(code.lessThan(-2.5).and(code.greaterThan(-4.5)), () => {
@@ -151,11 +162,17 @@ const surface = Fn(() => {
       If(code.greaterThan(-3.5), () => {
         const line = step(abs(fac.y), 0.03).mul(step(0.5, fract(fac.x.div(6))));
         c.assign(mix(c, vec3(0.92, 0.9, 0.84), line.mul(0.9)));
+        // Ireland: yellow edge line just inside each kerb.
+        const edge = step(0.86, abs(fac.y)).mul(step(abs(fac.y), 0.9)).mul(styleUniform);
+        c.assign(mix(c, vec3(0.93, 0.78, 0.15), edge));
       });
     })
     .ElseIf(code.lessThan(-4.5).and(code.greaterThan(-5.5)), () => {
       const n = vnoise(xz.mul(0.03)).mul(0.6).add(vnoise(xz.mul(0.17)).mul(0.4));
-      c.assign(mix(c, vec3(0.72, 0.47, 0.33), smoothstep(0.45, 0.75, n).mul(0.55)));
+      // Lagos: dust with laterite patches. Dublin: mown grass with worn, darker patches.
+      const lagosGround = mix(c, vec3(0.72, 0.47, 0.33), smoothstep(0.45, 0.75, n).mul(0.55));
+      const grass = mix(vec3(0.3, 0.46, 0.2), vec3(0.4, 0.52, 0.24), n).mul(vnoise(xz.mul(1.3)).mul(0.15).add(0.9));
+      c.assign(mix(lagosGround, grass, styleUniform));
       c.assign(c.mul(vnoise(xz.mul(0.7)).mul(0.1).add(0.91)));
       rough.assign(1);
     })
@@ -169,6 +186,15 @@ const surface = Fn(() => {
       c.assign(mix(c, vec3(0.42, 0.26, 0.16), rust.mul(0.38)));
       c.assign(c.mul(ridge.mul(0.12).add(0.9)));
       rough.assign(mix(float(0.45), float(0.85), rust));
+    })
+    .ElseIf(code.lessThan(-8.5).and(code.greaterThan(-9.5)), () => {
+      // Concrete roof tiles: rows of ~30 cm with slight per-tile shade.
+      const row = positionWorld.y.mul(3.4);
+      const tileRow = fract(row);
+      const tileId = floor(row).add(floor(xz.x.add(xz.y).mul(3)).mul(0.37));
+      c.assign(c.mul(fhash(tileId).mul(0.12).add(0.9)).mul(mix(float(0.78), float(1), smoothstep(0.0, 0.25, tileRow))));
+      c.assign(c.mul(vnoise(xz.mul(0.6)).mul(0.12).add(0.9)));
+      rough.assign(0.82);
     })
     .ElseIf(code.lessThan(-6.5), () => {
       c.assign(c.mul(vnoise(xz.mul(0.8)).mul(0.14).add(0.86)));
@@ -198,7 +224,7 @@ const nightGlow = Fn(() => {
     const bi = floor(u.div(bay));
     const bx = fract(u.div(bay));
     const cell = floor(positionWorld.xz.div(140));
-    const power = step(0.32, fhash(cell.x.mul(17.1).add(cell.y.mul(31.7)).add(floor(clockUniform.div(240)).mul(7.3))));
+    const power = max(step(0.32, fhash(cell.x.mul(17.1).add(cell.y.mul(31.7)).add(floor(clockUniform.div(240)).mul(7.3)))), styleUniform);
     const r = fhash(bi.mul(1.3).add(fl.mul(13)).add(seed.mul(71)));
     const lit = mix(step(r, 0.12), step(r, 0.62), power);
     const warm = mix(vec3(1.0, 0.78, 0.5), vec3(0.85, 0.95, 1.0), step(0.6, fhash(r.mul(9.1))));

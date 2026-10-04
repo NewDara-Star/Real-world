@@ -59,9 +59,15 @@ export class PlayerVehicle {
   /** impact speed of a collision this frame (m/s), 0 if none */
   impact = 0;
 
-  constructor(kind: VehicleKind, x: number, z: number, yaw: number) {
+  /** Driver's seat side: +1 left-hand drive (Lagos), -1 right-hand drive (Ireland). */
+  readonly seat: number;
+
+  constructor(kind: VehicleKind, x: number, z: number, yaw: number, drive: "right" | "left" = "right") {
+    this.seat = drive === "right" ? 1 : -1;
     this.kind = kind;
-    this.spec = SPECS[kind];
+    const base = SPECS[kind];
+    // Mirror the cockpit for right-hand-drive cars.
+    this.spec = { ...base, cockpit: base.cockpit.clone().setX(base.cockpit.x * this.seat) };
     this.x = x;
     this.z = z;
     this.yaw = yaw;

@@ -57,9 +57,22 @@ export function templateGeometry(t: Template): THREE.BufferGeometry {
 
 const box = (w: number, h: number, d: number, x = 0, y = 0, z = 0) => new THREE.BoxGeometry(w, h, d).translate(x, y + h / 2, z);
 
-/** Rounded puff of foliage: a smooth icosphere, slightly squashed. */
-const puff = (r: number, x: number, y: number, z: number, squash = 0.85) =>
-  new THREE.IcosahedronGeometry(r, 1).scale(1, squash, 1).translate(x, y, z);
+/**
+ * Rounded puff of foliage: a 20-face icosahedron (cheap) with sphere normals,
+ * so lighting reads soft and round rather than faceted.
+ */
+const puff = (r: number, x: number, y: number, z: number, squash = 0.85) => {
+  const g = new THREE.IcosahedronGeometry(r, 0);
+  const p = g.getAttribute("position");
+  const n: number[] = [];
+  const v = new THREE.Vector3();
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i).normalize();
+    n.push(v.x, v.y, v.z);
+  }
+  g.setAttribute("normal", new THREE.Float32BufferAttribute(n, 3));
+  return g.scale(1, squash, 1).translate(x, y, z);
+};
 
 /** Neem: a full, round, puffy crown on a short trunk. */
 function shadeTree(): Template {
@@ -227,6 +240,7 @@ export interface PropPlacement {
 /** Deterministic street furniture placement for a world tile. */
 export function placeProps(world: World): PropPlacement[] {
   const out: PropPlacement[] = [];
+  const lagos = world.city.lagosLife;
   const rand = mulberry32(1337);
   const free = (x: number, z: number, margin: number) =>
     world.inBounds(x, z) && !world.insideBuilding(x, z) && world.roadClearance(x, z) > margin;
@@ -264,7 +278,7 @@ export function placeProps(world: World): PropPlacement[] {
         sinceKiosk += 3;
         sinceLamp += 3;
         // Streetlights on the main roads, alternating sides, arm over the road.
-        if (r.cls <= 5 && sinceLamp > 32) {
+        if ((r.cls <= 5 || (!lagos && r.cls <= 6)) && sinceLamp > (lagos ? 32 : 38)) {
           const off = r.w / 2 + 0.6;
           const tx = px + nx * off * lampSide, tz = pz + nz * off * lampSide;
           if (free(tx, tz, 0.3)) {
@@ -275,19 +289,19 @@ export function placeProps(world: World): PropPlacement[] {
           }
         }
         // Trees: denser on quiet streets, sparse on big roads.
-        const treeGap = r.cls >= 6 ? 16 : 26;
+        const treeGap = (r.cls >= 6 ? 16 : 26) * (lagos ? 1 : 1.6);
         if (sinceTree > treeGap && rand() < 0.5) {
           const side = rand() < 0.5 ? 1 : -1;
           const off = r.w / 2 + 2.2 + rand() * 2;
           const tx = px + nx * off * side, tz = pz + nz * off * side;
           if (free(tx, tz, 1.5)) {
-            const kind = r.cls <= 4 && rand() < 0.4 ? "palm" : rand() < 0.4 ? "almond" : "tree";
+            const kind = lagos ? (r.cls <= 4 && rand() < 0.4 ? "palm" : rand() < 0.4 ? "almond" : "tree") : "tree";
             out.push({ t: kind, x: tx, z: tz, rot: rand() * 6.28, s: 0.8 + rand() * 0.5 });
             sinceTree = 0;
           }
         }
         // NEPA poles on one side of roads big enough to carry lines, with wires between.
-        if (r.cls <= 6 && sincePole > 34) {
+        if (lagos && r.cls <= 6 && sincePole > 34) {
           const off = r.w / 2 + 1.0;
           const tx = px + nx * off, tz = pz + nz * off;
           if (free(tx, tz, 0.5)) {
@@ -307,7 +321,7 @@ export function placeProps(world: World): PropPlacement[] {
           }
         }
         // Container kiosks along busier streets.
-        if (r.cls >= 4 && r.cls <= 6 && sinceKiosk > 70 && rand() < 0.35) {
+        if (lagos && r.cls >= 4 && r.cls <= 6 && sinceKiosk > 70 && rand() < 0.35) {
           const side = rand() < 0.5 ? 1 : -1;
           const off = r.w / 2 + 2.0;
           const tx = px + nx * off * side, tz = pz + nz * off * side;
@@ -322,7 +336,7 @@ export function placeProps(world: World): PropPlacement[] {
 
   // Umbrella sellers cluster at busy junctions.
   for (const nd of nodes.values()) {
-    if (nd.n < 3) continue;
+    if (!lagos || nd.n < 3) continue;
     const count = Math.floor(rand() * 4);
     for (let k = 0; k < count; k++) {
       const a = rand() * Math.PI * 2, r = 6 + rand() * 9;
@@ -333,7 +347,7 @@ export function placeProps(world: World): PropPlacement[] {
 
   // Markets get a crowd of umbrellas.
   for (const p of world.meta.places) {
-    if (!/market|shopping/.test(p.cat)) continue;
+    if (!lagos || !/market|shopping/.test(p.cat)) continue;
     for (let k = 0; k < 14; k++) {
       const a = rand() * Math.PI * 2, r = 8 + rand() * 30;
       const x = p.x + Math.cos(a) * r, z = p.z + Math.sin(a) * r;
@@ -355,7 +369,7 @@ export function placeProps(world: World): PropPlacement[] {
       for (let z = minZ; z < maxZ; z += 11) {
         const jx = x + rand() * 8, jz = z + rand() * 8;
         if (rand() < 0.55 && pointInPoly(a.pts, jx, jz) && free(jx, jz, 1)) {
-          const kind = rand() < 0.2 ? "palm" : rand() < 0.35 ? "almond" : "tree";
+          const kind = lagos ? (rand() < 0.2 ? "palm" : rand() < 0.35 ? "almond" : "tree") : "tree";
           out.push({ t: kind, x: jx, z: jz, rot: rand() * 6.28, s: 0.8 + rand() * 0.6 });
         }
       }

@@ -7,7 +7,12 @@ Reads the Yaba Overture parquet extracts in research/data and writes:
 Coordinates are metres relative to the tile centre, stored as int16 decimetres:
 x points east, z points south (three.js convention, north is -z).
 
-Usage: python3 tools/bake/bake_world.py [--name yaba] [--bbox W S E N]
+Usage:
+  python3 tools/bake/bake_world.py --name yaba --bbox 3.362 6.494 3.384 6.520
+  python3 tools/bake/bake_world.py --name finglas --style dublin --prefix finglas/finglas_overture \
+      --bbox -6.323 53.380 -6.269 53.412 --spawn-place "RSA Test Centre"
+
+File format LGW2 = LGW1 plus a speed limit byte (km/h) per road.
 """
 import argparse
 import hashlib
@@ -46,6 +51,7 @@ PLACE_KEEP = (
     "market", "shopping", "church", "mosque", "worship", "religious", "hospital", "university", "college",
     "school", "stadium", "bank", "restaurant", "eatery", "bar", "lounge", "club", "hotel", "gym", "fitness",
     "park", "bus", "station", "cinema", "theater", "professional_service", "technical", "office", "fire",
+    "specialty_school", "automotive", "government", "supermarket", "pharmacy", "post",
 )
 
 
@@ -53,6 +59,9 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--name", default="yaba")
     p.add_argument("--bbox", nargs=4, type=float, default=[3.362, 6.494, 3.384, 6.520], metavar=("W", "S", "E", "N"))
+    p.add_argument("--prefix", default="yaba_overture", help="parquet file prefix inside research/data")
+    p.add_argument("--style", default="lagos", choices=["lagos", "dublin"], help="height guesses and default speed limits")
+    p.add_argument("--spawn-place", default="co-creation", help="spawn next to the first place whose name contains this")
     return p.parse_args()
 
 
@@ -78,7 +87,17 @@ def stable_rand(key):
     return int(hashlib.md5(key.encode()).hexdigest()[:8], 16) / 0xFFFFFFFF
 
 
-def load_height_raster():
+# Default speed limits (km/h) by road class id when the data has none.
+DEFAULT_SPEED = {
+    "lagos": {1: 80, 2: 70, 3: 60, 4: 50, 5: 50, 6: 30, 7: 20, 8: 20, 9: 10, 10: 0, 11: 0},
+    # Ireland: 50 in built-up areas, 100 on national roads, 120 on motorways.
+    "dublin": {1: 100, 2: 80, 3: 60, 4: 50, 5: 50, 6: 50, 7: 30, 8: 30, 9: 10, 10: 0, 11: 0},
+}
+
+
+def load_height_raster(style):
+    if style != "lagos":
+        return None  # Google 2.5D only covers the Global South
     # Prefer the full-area raster from fetch_heights.py; fall back to the 1 km research sample.
     for fname in ("yaba_google_temporal_2023.tif", "yaba_google_temporal_2023_1km.tif"):
         path = os.path.join(DATA, fname)
@@ -105,9 +124,19 @@ def raster_height(raster, lon, lat):
     return float(np.median(v)) if v.size else None
 
 
-def guess_height(key, area_m2):
-    """Plausible Lagos mainland storey counts when no data exists."""
+def guess_height(key, area_m2, style="lagos"):
+    """Plausible storey counts when no data exists."""
     r = stable_rand(key)
+    if style == "dublin":
+        # Suburban Dublin: two-storey semis and terraces, single-storey sheds and
+        # extensions, the odd 3-4 storey apartment block or big industrial unit.
+        if area_m2 < 25:
+            return 3.0  # sheds, garages
+        if area_m2 < 180:
+            return 5.6 + (r > 0.85) * 2.8
+        if area_m2 < 900:
+            return 6.4 + (r > 0.6) * 3.0
+        return 7.5 + r * 3
     if area_m2 < 60:
         floors = 1
     elif area_m2 < 200:
@@ -148,10 +177,10 @@ def main():
     where = f"bbox.xmax >= {w} and bbox.xmin <= {e} and bbox.ymax >= {s} and bbox.ymin <= {n}"
 
     def pq(layer):
-        return os.path.join(DATA, f"yaba_overture_{layer}.parquet")
+        return os.path.join(DATA, f"{args.prefix}_{layer}.parquet")
 
     # ---- buildings -------------------------------------------------------
-    raster = load_height_raster()
+    raster = load_height_raster(args.style)
     buildings = []
     height_src = {"tagged": 0, "raster": 0, "guess": 0}
     rows = con.sql(
@@ -180,7 +209,7 @@ def main():
                 h = raster_height(raster, cen.x, cen.y)
                 src = "raster"
                 if h is None or h < 2.5:
-                    h, src = guess_height(bid, area), "guess"
+                    h, src = guess_height(bid, area, args.style), "guess"
             height_src[src] += 1
             # Counter-clockwise in the x/z plane (seen from above, with z south) for consistent walls.
             if shapely.Polygon(ring).exterior.is_ccw:
@@ -200,20 +229,32 @@ def main():
 
     roads = []
     rows = con.sql(
-        f"select subtype, class, names.primary, geometry from '{pq('segment')}' where {where}"
+        f"select subtype, class, names.primary, geometry, speed_limits from '{pq('segment')}' where {where}"
     ).fetchall()
-    for subtype, cls, nm, wkb in rows:
+    speeds_found = 0
+    for subtype, cls, nm, wkb, limits in rows:
         if subtype == "rail":
             cid, width = RAIL_CLASS
         elif subtype == "road" and cls in ROAD_CLASSES:
             cid, width = ROAD_CLASSES[cls]
         else:
             continue
+        speed = 0
+        for lim in limits or []:
+            mx = (lim or {}).get("max_speed") or {}
+            if mx.get("value"):
+                v = float(mx["value"]) * (1.609 if mx.get("unit") == "mph" else 1)
+                speed = int(round(v))
+                break
+        if speed:
+            speeds_found += 1
+        else:
+            speed = DEFAULT_SPEED[args.style].get(cid, 50)
         geom = shapely.intersection(shapely.from_wkb(wkb), clip)
         for line in lines_of(geom):
             pts = frame.xz(shapely.simplify(line, 0.000002).coords)
             if len(pts) >= 2:
-                roads.append((cid, width, name_id(nm), pts))
+                roads.append((cid, width, name_id(nm), pts, speed))
 
     # ---- areas: water, green space, pitches, paved ------------------------
     areas = []
@@ -227,7 +268,7 @@ def main():
         for line in lines_of(geom):
             pts = frame.xz(shapely.simplify(line, 0.000002).coords)
             if len(pts) >= 2:
-                roads.append((WATER_LINE_CLASS[0], WATER_LINE_CLASS[1], 0xFFFF, pts))
+                roads.append((WATER_LINE_CLASS[0], WATER_LINE_CLASS[1], 0xFFFF, pts, 0))
     rows = con.sql(f"select class, geometry from '{pq('land_use')}' where {where}").fetchall()
     for cls, wkb in rows:
         kind = AREA_GREEN if cls in GREEN_LANDUSE else AREA_PITCH if cls in PITCH_LANDUSE else AREA_PAVED if cls in PAVED_LANDUSE else 0
@@ -242,7 +283,7 @@ def main():
     places, seen = [], set()
     rows = con.sql(
         f"select names.primary, basic_category, confidence, geometry from '{pq('place')}' "
-        f"where {where} and confidence >= 0.8 and names.primary is not null order by confidence desc"
+        f"where {where} and confidence >= 0.6 and names.primary is not null order by confidence desc"
     ).fetchall()
     for nm, cat, conf, wkb in rows:
         pt = shapely.from_wkb(wkb)
@@ -258,14 +299,14 @@ def main():
 
     # ---- write -------------------------------------------------------------
     os.makedirs(OUT, exist_ok=True)
-    buf = bytearray(b"LGW1")
+    buf = bytearray(b"LGW2")
     buf += struct.pack("<I", len(buildings))
     for h, ring in buildings:
         buf += struct.pack("<HH", int(round(h * 10)), len(ring))
         buf += q(ring).tobytes()
     buf += struct.pack("<I", len(roads))
-    for cid, width, nid, pts in roads:
-        buf += struct.pack("<BBHH", cid, int(round(width * 2)), nid, len(pts))
+    for cid, width, nid, pts, speed in roads:
+        buf += struct.pack("<BBHHB", cid, int(round(width * 2)), nid, len(pts), min(255, speed))
         buf += q(pts).tobytes()
     buf += struct.pack("<I", len(areas))
     for kind, ring in areas:
@@ -276,8 +317,8 @@ def main():
 
     half_x = (e - w) / 2 * frame.kx
     half_z = (n - s) / 2 * frame.ky
-    cchub = next((p for p in places if "co-creation" in p["name"].lower()), None)
-    spawn = {"x": cchub["x"] + 12, "z": cchub["z"] + 8} if cchub else {"x": 0, "z": 0}
+    anchor = next((p for p in places if args.spawn_place.lower() in p["name"].lower()), None)
+    spawn = {"x": anchor["x"] + 12, "z": anchor["z"] + 8} if anchor else {"x": 0, "z": 0}
     meta = {
         "name": args.name,
         "origin": {"lon": frame.lon0, "lat": frame.lat0},
@@ -285,7 +326,8 @@ def main():
         "names": names,
         "places": places,
         "spawn": spawn,
-        "attribution": "© OpenStreetMap contributors, Overture Maps Foundation, Google Open Buildings",
+        "style": args.style,
+        "attribution": "© OpenStreetMap contributors, Overture Maps Foundation" + (", Google Open Buildings" if args.style == "lagos" else ""),
     }
     with open(os.path.join(OUT, f"{args.name}.json"), "w") as f:
         json.dump(meta, f, separators=(",", ":"), ensure_ascii=False)
@@ -293,7 +335,7 @@ def main():
     import gzip
     print(json.dumps({
         "buildings": len(buildings), "heights": height_src, "roads": len(roads), "areas": len(areas),
-        "street_names": len(names), "places": len(places),
+        "street_names": len(names), "places": len(places), "roads_with_speed_data": speeds_found,
         "bin_bytes": len(buf), "bin_gzip_bytes": len(gzip.compress(bytes(buf), 9)),
         "extent_m": [round(half_x * 2), round(half_z * 2)], "spawn": spawn,
     }, indent=1))

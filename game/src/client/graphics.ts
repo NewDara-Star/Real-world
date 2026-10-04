@@ -144,6 +144,10 @@ export class Graphics {
     this.renderer.toneMappingExposure = 0.95 + (1 - day) * 0.6;
   }
 
+  setTurbidity(t: number) {
+    this.sky.turbidity.value = t;
+  }
+
   setFogFar(far: number) {
     this.fogFar = far;
     (this.scene.fog as THREE.Fog).far = far;

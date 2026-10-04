@@ -1,7 +1,8 @@
 import * as THREE from "three/webgpu";
 import { StreetAudio } from "./audio";
 import { Graphics, type Quality } from "./graphics";
-import { clockUniform, createVertexColorMaterial } from "./facade";
+import { clockUniform, createVertexColorMaterial, styleUniform } from "./facade";
+import { cityFor, localHours } from "./cities";
 import { createLightPools } from "./nightfx";
 import { Avatar } from "./avatar";
 import { Input } from "./input";
@@ -19,7 +20,9 @@ import { G29 } from "./g29";
 
 const params = new URLSearchParams(location.search);
 const DEBUG = params.has("debug");
-const ZONE = "yaba";
+const CITY = cityFor(params.get("city"));
+const ZONE = CITY.zone;
+styleUniform.value = CITY.style === "dublin" ? 1 : 0;
 const WALK = 2.6;
 const RUN = 5.6;
 const RADIUS = 0.35;
@@ -44,15 +47,12 @@ let fogFar = gfx.fogFar;
 
 // Clock: real Lagos time (WAT, UTC+1) unless ?time=HH[.MM] is given.
 // ?timescale=N speeds it up (60 = one game hour per real minute).
-const lagosNow = () => {
-  const d = new Date();
-  return (d.getUTCHours() + 1 + d.getUTCMinutes() / 60) % 24;
-};
-let gameHours = params.has("time") ? Number(params.get("time")) || 0 : lagosNow();
+let gameHours = params.has("time") ? Number(params.get("time")) || 0 : localHours(CITY.tz);
+gfx.setTurbidity(CITY.turbidity);
 const timeScale = Number(params.get("timescale")) || 1;
 gfx.setTime(gameHours);
 
-const world = new World();
+const world = new World(CITY);
 scene.add(world.group);
 let traffic: Traffic | null = null;
 const audio = new StreetAudio();
@@ -190,7 +190,7 @@ $<HTMLInputElement>("name").value = NAMES[Math.floor(Math.random() * NAMES.lengt
 const enterBtn = $<HTMLButtonElement>("enter");
 
 world
-  .load(ZONE, (p) => (enterBtn.textContent = `Loading Yaba… ${Math.round(p * 100)}%`))
+  .load(ZONE, (p) => (enterBtn.textContent = `Loading ${CITY.label}… ${Math.round(p * 100)}%`))
   .then(() => {
     if (!webgl) {
       enterBtn.textContent = "Open in Chrome to play";
@@ -204,7 +204,7 @@ world
     scene.add(traffic.group);
     scene.add(createLightPools(world.lamps));
     enterBtn.disabled = false;
-    enterBtn.textContent = meetId ? "Join your padi in Yaba" : "Enter Yaba";
+    enterBtn.textContent = meetId ? `Join your padi in ${CITY.label}` : `Enter ${CITY.label}`;
     const spot = world.findOpen(world.meta.spawn.x + rand(-6, 6), world.meta.spawn.z + rand(-6, 6));
     me.pos.set(spot.x, 0, spot.z);
     placeCamera(1);
@@ -225,6 +225,7 @@ enterBtn.addEventListener("click", () => {
   $("join").hidden = true;
   $("hud").hidden = false;
   $("drivebar").hidden = false;
+  if (!CITY.lagosLife) $("drive-danfo").style.display = "none";
   $("chat").hidden = false;
   $("debug").hidden = !DEBUG;
   net.connect({ zone: ZONE, layer: Number(params.get("layer")) || 1, name: me.name, bio: me.bio, pos: () => me.pos });
@@ -315,7 +316,7 @@ $("invite").addEventListener("click", async () => {
     return;
   }
   const url = `${location.origin}/?meet=${net.id}&layer=${net.layer}`;
-  const text = `I dey ${$("where").textContent?.replace("📍 ", "") || "Yaba"} for Eko World. Come find me 👇🏾`;
+  const text = `I dey ${$("where").textContent?.replace("📍 ", "") || CITY.label} for Eko World. Come find me 👇🏾`;
   try {
     if (navigator.share) {
       await navigator.share({ title: "Eko World", text, url });
@@ -544,7 +545,7 @@ function frame(now: number) {
   if (hudTimer <= 0) {
     hudTimer = 0.5;
     const street = world.streetAt(me.pos.x, me.pos.z);
-    $("where").textContent = `📍 ${street ? `${street}, Yaba` : "Yaba"}`;
+    $("where").textContent = `📍 ${street ? `${street}, ${CITY.label}` : CITY.label}`;
     const hh = Math.floor(gameHours), mm = Math.floor((gameHours % 1) * 60);
     $("clock").textContent = `${gameHours >= 6.5 && gameHours < 18.75 ? "☀️" : "🌙"} ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
   }
@@ -617,7 +618,7 @@ function enterVehicle(kind: VehicleKind) {
     toast("No road near here. Walk to a street first 🛣️");
     return;
   }
-  car = new PlayerVehicle(kind, spot.x, spot.z, spot.yaw);
+  car = new PlayerVehicle(kind, spot.x, spot.z, spot.yaw, CITY.drive);
   if (DEBUG) Object.assign(window, { __car: car });
   scene.add(car.root);
   me.avatar.root.visible = false;
@@ -636,7 +637,8 @@ function enterVehicle(kind: VehicleKind) {
 function exitVehicle() {
   if (!car || !me.avatar) return;
   // Step out on the driver's side (left), onto open ground.
-  const lx = car.x + Math.cos(car.yaw) * 2.2, lz = car.z - Math.sin(car.yaw) * 2.2;
+  const side = 2.2 * car.seat;
+  const lx = car.x + Math.cos(car.yaw) * side, lz = car.z - Math.sin(car.yaw) * side;
   const spot = world.openSpotNear(lx, lz);
   me.pos.set(spot.x, 0, spot.z);
   me.yaw = car.yaw;
@@ -798,7 +800,7 @@ $("wheel-setup").addEventListener("click", async () => {
 // ---------------------------------------------------------------- utils ----
 
 function updateOnline() {
-  $("online").textContent = `● ${online} in Yaba`;
+  $("online").textContent = `● ${online} in ${CITY.label}`;
 }
 let toastTimer = 0;
 function toast(text: string) {

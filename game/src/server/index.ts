@@ -7,7 +7,7 @@ interface Env {
   ASSETS: Fetcher;
 }
 
-const ZONES = new Set(["yaba"]);
+const ZONES = new Set(["yaba", "finglas"]);
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {

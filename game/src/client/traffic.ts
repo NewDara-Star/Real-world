@@ -131,7 +131,12 @@ export class Traffic {
   /** Number of vehicles within ~60 m of the player, for the traffic sound bed. */
   nearbyVehicles = 0;
 
+  /** +1 keeps right (Lagos), -1 keeps left (Ireland). */
+  private side: number;
+
   constructor(world: World, private ev: TrafficEvents, budget: { vehicles: number; walkers: number }) {
+    this.side = world.city.drive === "right" ? 1 : -1;
+    const lagos = world.city.lagosLife;
     for (const r of world.roads) {
       if (r.cls >= 1 && r.cls <= 6) this.addEdge(r, this.vehicleEdges, this.vNodes);
       if (r.cls >= 3 && r.cls <= 9) this.addEdge(r, this.walkEdges, this.wNodes);
@@ -139,8 +144,10 @@ export class Traffic {
     const mat = createVertexColorMaterial(0.55, 0.15);
     const scale = budget.vehicles / VEHICLE_KINDS.reduce((s, k) => s + k.max, 0);
     VEHICLE_KINDS.forEach((k, kind) => {
-      const n = Math.max(1, Math.round(k.max * scale));
-      const mesh = new THREE.InstancedMesh(templateGeometry(k.tpl), mat, n);
+      // Danfos, kekes and okadas only in Lagos; elsewhere just cars.
+      const local = lagos || k.name.startsWith("car");
+      const n = local ? Math.max(1, Math.round(k.max * scale * (lagos ? 1 : 2.2))) : 0;
+      const mesh = new THREE.InstancedMesh(templateGeometry(k.tpl), mat, Math.max(1, n));
       mesh.count = 0;
       mesh.frustumCulled = false;
       mesh.castShadow = true;
@@ -272,8 +279,8 @@ export class Traffic {
       if (vehicle) {
         const k = VEHICLE_KINDS[a.kind];
         a.cruise = k.speed * (e.road.cls >= 6 ? 0.6 : 1) * (0.8 + this.rand() * 0.4);
-        // Nigeria drives on the right: offset to the right of travel.
-        a.offset = Math.max(1.2, e.road.w / 4);
+        // Keep to the city's side of the road.
+        a.offset = Math.max(1.2, e.road.w / 4) * this.side;
       } else {
         a.cruise = 1.1 + this.rand() * 0.5;
         a.offset = e.road.w / 2 + 1.0 + this.rand() * 1.2;
@@ -306,7 +313,7 @@ export class Traffic {
           a.dir = -1;
           a.t = next.len;
         }
-        if (vehicle) a.offset = Math.max(1.2, next.road.w / 4);
+        if (vehicle) a.offset = Math.max(1.2, next.road.w / 4) * this.side;
       }
     }
     this.place(a);
