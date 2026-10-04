@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { cleanBio, cleanName, moderateChat } from "../shared/moderation";
 import {
+  CLOSE_LAYER_FULL,
   CHAT_RADIUS,
   LAYER_CAPACITY,
   VIEW_RADIUS,
@@ -30,6 +31,8 @@ const COLORS = [0xe4572e, 0x29335c, 0xf3a712, 0x669bbc, 0x2a9d8f, 0x8e44ad, 0xd6
 const CHAT_COOLDOWN_MS = 1200;
 /** Moves are batched per recipient and flushed at this interval (matches client send rate). */
 const FLUSH_MS = 100;
+/** Most movers sent to one player per flush; the rest wait for the next flush. */
+const MAX_PER_FLUSH = 40;
 /** Attachments (hibernation-safe copies) are refreshed this often while players move. */
 const PERSIST_MS = 1000;
 /** Every Nth move from a player, also send them everyone in view (catches idle players they walked up to). */
@@ -67,7 +70,12 @@ export class Zone extends DurableObject {
       return new Response("expected websocket", { status: 426 });
     }
     if (this.live.size >= LAYER_CAPACITY) {
-      return new Response("layer full", { status: 409 });
+      // Browsers can't read HTTP status on a failed upgrade, so accept and close
+      // with a distinct code the client understands as "try the next layer".
+      const full = new WebSocketPair();
+      full[1].accept();
+      full[1].close(CLOSE_LAYER_FULL, "layer full");
+      return new Response(null, { status: 101, webSocket: full[0] });
     }
     const url = new URL(request.url);
     const used = new Set([...this.live.values()].map((l) => l.s.id));
@@ -199,12 +207,22 @@ export class Zone extends DurableObject {
     if (this.flushTimer) return;
     this.flushTimer = setTimeout(() => {
       this.flushTimer = null;
+      let leftover = false;
       for (const [ws, l] of this.live) {
         if (!l.pending.size) continue;
-        const states: MoveState[] = [...l.pending];
-        l.pending.clear();
-        safeSend(ws, encodeMoves(states.slice(0, 400)));
+        let states: MoveState[] = [...l.pending];
+        if (states.length > MAX_PER_FLUSH) {
+          // Crowded: send the nearest movers now and carry the rest to the next
+          // flush, so distant people update at a lower rate and data stays bounded.
+          const { x, z } = l.s;
+          states.sort((a, b) => (a.x - x) ** 2 + (a.z - z) ** 2 - ((b.x - x) ** 2 + (b.z - z) ** 2));
+          states = states.slice(0, MAX_PER_FLUSH);
+          for (const st of states) l.pending.delete(st as Session);
+          leftover = true;
+        } else l.pending.clear();
+        safeSend(ws, encodeMoves(states));
       }
+      if (leftover) this.scheduleFlush();
     }, FLUSH_MS);
   }
 

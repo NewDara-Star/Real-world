@@ -19,7 +19,8 @@ const isTouch = matchMedia("(pointer: coarse)").matches;
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const canvas = $<HTMLCanvasElement>("view");
 
-if (!hasWebGL()) {
+const webgl = hasWebGL();
+if (!webgl) {
   $("joinnote").textContent =
     "Your browser can't show 3D. If you're on Opera Mini, open this link in Chrome. 🙏🏾";
 }
@@ -157,6 +158,10 @@ const enterBtn = $<HTMLButtonElement>("enter");
 world
   .load(ZONE, (p) => (enterBtn.textContent = `Loading Yaba… ${Math.round(p * 100)}%`))
   .then(() => {
+    if (!webgl) {
+      enterBtn.textContent = "Open in Chrome to play";
+      return;
+    }
     enterBtn.disabled = false;
     enterBtn.textContent = meetId ? "Join your padi in Yaba" : "Enter Yaba";
     const spot = world.findOpen(world.meta.spawn.x + rand(-6, 6), world.meta.spawn.z + rand(-6, 6));
@@ -178,7 +183,7 @@ enterBtn.addEventListener("click", () => {
   $("hud").hidden = false;
   $("chat").hidden = false;
   $("debug").hidden = !DEBUG;
-  net.connect({ zone: ZONE, layer: Number(params.get("layer")) || 1, name: me.name, bio: me.bio, x: me.pos.x, z: me.pos.z });
+  net.connect({ zone: ZONE, layer: Number(params.get("layer")) || 1, name: me.name, bio: me.bio, pos: () => me.pos });
   if (!isTouch) toast("WASD to walk · Shift to run · drag to look around");
   else toast("Left thumb to walk · drag right side to look");
 });
@@ -246,6 +251,10 @@ $("card-wave").addEventListener("click", () => {
 // --------------------------------------------------------------- invite ----
 
 $("invite").addEventListener("click", async () => {
+  if (!net.id) {
+    toast("Still connecting… try again in a second");
+    return;
+  }
   const url = `${location.origin}/?meet=${net.id}&layer=${net.layer}`;
   const text = `I dey ${$("where").textContent?.replace("📍 ", "") || "Yaba"} for Eko World. Come find me 👇🏾`;
   try {
@@ -385,6 +394,7 @@ function updateLabels(now: number) {
 
 let last = performance.now();
 let hudTimer = 0;
+let rankTimer = 0;
 let fpsFrames = 0;
 let fpsTime = 0;
 let fps = 60;
@@ -408,11 +418,11 @@ function frame(now: number) {
       const rx = Math.cos(me.camYaw), rz = -Math.sin(me.camYaw);
       const dx = fx * y + rx * x, dz = fz * y + rz * x;
       const len = Math.hypot(dx, dz) || 1;
-      const before = me.pos.clone();
+      const bx = me.pos.x, bz = me.pos.z;
       me.pos.x += (dx / len) * speed * dt;
       me.pos.z += (dz / len) * speed * dt;
       world.collide(me.pos, RADIUS);
-      me.speed = before.distanceTo(me.pos) / dt;
+      me.speed = Math.hypot(me.pos.x - bx, me.pos.z - bz) / dt;
       me.yaw = lerpAngle(me.yaw, Math.atan2(dx, dz), Math.min(1, dt * 12));
     } else me.speed = 0;
     me.avatar.root.position.x = me.pos.x;
@@ -424,14 +434,18 @@ function frame(now: number) {
   }
 
   // Show only the nearest remotes; everyone else costs nothing to draw.
-  const ranked = [...remotes.values()]
-    .map((r) => ({ r, d: (r.x - me.pos.x) ** 2 + (r.z - me.pos.z) ** 2 }))
-    .sort((a, b) => a.d - b.d);
-  ranked.forEach(({ r, d }, i) => {
-    r.shown = i < maxAvatars && d < 140 * 140;
-    r.avatar.root.visible = r.shown;
-    updateRemote(r, now, dt);
-  });
+  rankTimer -= dt;
+  if (rankTimer <= 0) {
+    rankTimer = 0.25;
+    [...remotes.values()]
+      .map((r) => ({ r, d: (r.x - me.pos.x) ** 2 + (r.z - me.pos.z) ** 2 }))
+      .sort((a, b) => a.d - b.d)
+      .forEach(({ r, d }, i) => {
+        r.shown = i < maxAvatars && d < 140 * 140;
+        r.avatar.root.visible = r.shown;
+      });
+  }
+  for (const r of remotes.values()) updateRemote(r, now, dt);
 
   placeCamera(dt);
   world.cull(me.pos.x, me.pos.z, fogFar);
@@ -468,10 +482,24 @@ requestAnimationFrame(frame);
 
 function placeCamera(dt: number) {
   const far = DEBUG && params.has("far");
-  const dist = far ? 70 : 7.5, height = far ? 60 : 3.4;
-  const tx = me.pos.x + Math.sin(me.camYaw) * dist;
-  const tz = me.pos.z + Math.cos(me.camYaw) * dist;
-  const k = Math.min(1, dt * 10);
+  let dist = far ? 70 : 7.5;
+  const height = far ? 60 : 3.4;
+  const sx = Math.sin(me.camYaw), sz = Math.cos(me.camYaw);
+  // Walk out from the player and stop the camera just before the first wall,
+  // so narrow Lagos streets don't put the camera inside a building.
+  if (!far) {
+    for (let d = 0.6; d <= dist; d += 0.4) {
+      if (world.insideBuilding(me.pos.x + sx * d, me.pos.z + sz * d)) {
+        dist = Math.max(1.2, d - 0.5);
+        break;
+      }
+    }
+  }
+  const tx = me.pos.x + sx * dist;
+  const tz = me.pos.z + sz * dist;
+  // Snap inward immediately (never show a wall), ease outward.
+  const curDist = Math.hypot(camera.position.x - me.pos.x, camera.position.z - me.pos.z);
+  const k = curDist > dist + 0.3 ? 1 : Math.min(1, dt * 10);
   camera.position.x += (tx - camera.position.x) * k;
   camera.position.y += (height - camera.position.y) * k;
   camera.position.z += (tz - camera.position.z) * k;

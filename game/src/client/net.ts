@@ -1,4 +1,5 @@
 import {
+  CLOSE_LAYER_FULL,
   FLAG_MOVING,
   MAX_LAYERS,
   OP_MOVES,
@@ -27,8 +28,8 @@ export interface JoinParams {
   layer: number;
   name: string;
   bio: string;
-  x: number;
-  z: number;
+  /** Read on every (re)connect so the server always gets the current position. */
+  pos: () => { x: number; z: number };
 }
 
 /** WebSocket client with layer overflow, reconnect and rate-limited movement. */
@@ -54,14 +55,16 @@ export class Net {
   private open(p: JoinParams) {
     this.ev.status("connecting");
     const proto = location.protocol === "https:" ? "wss" : "ws";
+    const { x, z } = p.pos();
     const q = new URLSearchParams({
       zone: p.zone,
       layer: String(this.layer),
       name: p.name,
       bio: p.bio,
-      x: p.x.toFixed(1),
-      z: p.z.toFixed(1),
+      x: x.toFixed(1),
+      z: z.toFixed(1),
     });
+    this.lastState = ""; // force a fresh position update after (re)connecting
     const ws = new WebSocket(`${proto}://${location.host}/ws?${q}`);
     ws.binaryType = "arraybuffer";
     this.ws = ws;
@@ -92,16 +95,15 @@ export class Net {
     ws.onclose = (e) => {
       this.ws = null;
       if (this.closedByUs) return;
-      // A full layer refuses the upgrade before any welcome: try the next one.
-      if (!welcomed && this.layer < MAX_LAYERS && this.retry < 3) {
+      if (e.code === CLOSE_LAYER_FULL && this.layer < MAX_LAYERS) {
         this.layer++;
         this.open(p);
         return;
       }
-      this.ev.status("offline");
+      // Network trouble: retry the same layer with backoff.
+      if (welcomed || this.retry > 0) this.ev.status("offline");
       const delay = Math.min(15000, 1000 * 2 ** this.retry++);
       setTimeout(() => !this.closedByUs && this.open(p), delay);
-      void e;
     };
   }
 

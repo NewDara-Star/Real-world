@@ -17,13 +17,9 @@ function bot(i, layer = 1) {
   const ws = new WebSocket(`${BASE}/ws?${q}`);
   ws.binaryType = "arraybuffer";
   let timer;
-  ws.on("unexpected-response", (_req, res) => {
-    if (res.statusCode === 409 && layer < 50) bot(i, layer + 1);
-    else stats.refused++;
-  });
+  ws.on("unexpected-response", () => stats.refused++);
+  let welcomed = false;
   ws.on("open", () => {
-    stats.connected++;
-    stats.layers[layer] = (stats.layers[layer] ?? 0) + 1;
     timer = setInterval(() => {
       yaw += 0.05;
       x += Math.cos(yaw) * 0.3;
@@ -41,11 +37,19 @@ function bot(i, layer = 1) {
     if (isBinary) stats.movesIn += new DataView(data).getUint16(1, true);
     else {
       const m = JSON.parse(data.toString());
+      if (m.t === "welcome" && !welcomed) {
+        welcomed = true;
+        stats.connected++;
+        stats.layers[layer] = (stats.layers[layer] ?? 0) + 1;
+      }
       if (m.t === "chat") stats.chatsIn++;
       if (m.t === "notice") stats.notices++;
     }
   });
-  ws.on("close", () => clearInterval(timer));
+  ws.on("close", (code) => {
+    clearInterval(timer);
+    if (code === 4009 && layer < 50) bot(i, layer + 1); // layer full: try the next one
+  });
   ws.on("error", (e) => { stats.errors = (stats.errors ?? 0) + 1; if ((stats.errors ?? 0) <= 3) console.error("bot error", i, layer, e.message); });
   return () => { clearInterval(timer); ws.close(); };
 }

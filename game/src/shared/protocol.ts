@@ -20,6 +20,8 @@ export const CHAT_RADIUS = 30;
 /** Players per zone layer before new arrivals go to the next layer. */
 export const LAYER_CAPACITY = 120;
 export const MAX_LAYERS = 50;
+/** WebSocket close code meaning "this layer is full, try the next one". */
+export const CLOSE_LAYER_FULL = 4009;
 /** Client movement send rate while moving. */
 export const SEND_HZ = 10;
 

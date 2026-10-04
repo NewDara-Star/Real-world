@@ -79,8 +79,12 @@ def stable_rand(key):
 
 
 def load_height_raster():
-    path = os.path.join(DATA, "yaba_google_temporal_2023_1km.tif")
-    if not os.path.exists(path):
+    # Prefer the full-area raster from fetch_heights.py; fall back to the 1 km research sample.
+    for fname in ("yaba_google_temporal_2023.tif", "yaba_google_temporal_2023_1km.tif"):
+        path = os.path.join(DATA, fname)
+        if os.path.exists(path):
+            break
+    else:
         return None
     ras = rasterio.open(path)
     # Band 1: height in 0.5 m steps, band 2: building presence in percent (see research doc 03).
