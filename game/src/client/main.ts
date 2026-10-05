@@ -10,6 +10,7 @@ import { Net } from "./net";
 import { Traffic } from "./traffic";
 import { NetTraffic, VEHICLE_MODELS } from "./trafficnet";
 import { Crowd } from "./crowd";
+import { Grass } from "./grass";
 import { loadSignalModels, loadVehicleModels } from "./models";
 import { RoadSigns } from "./roadsigns";
 import { ALLOW_CAR, ALLOW_SERVICE, LaneKind } from "./roadnet";
@@ -75,6 +76,7 @@ const world = new World(CITY);
 scene.add(world.group);
 let traffic: Traffic | NetTraffic | null = null;
 let signs: RoadSigns | null = null;
+let grass: Grass | null = null;
 let examiner: Examiner | null = null;
 let navigator_: Navigator | null = null;
 let mapView: MapView | null = null;
@@ -249,6 +251,11 @@ world
     if (!webgl) {
       enterBtn.textContent = "Open in Chrome to play";
       return;
+    }
+    // Grass blades on Dublin's lawns and verges near the camera (Lagos's ground is dust).
+    if (CITY.style === "dublin") {
+      grass = new Grass(world.group, world.trees ? [world.trees.group] : []);
+      scene.add(grass.mesh);
     }
     const honk = {
       honk(x: number, z: number, kind: string) {
@@ -648,6 +655,11 @@ function frame(now: number) {
   }
   placeCamera(dt);
   world.cull(me.pos.x, me.pos.z, fogFar);
+  // Grass is a high-quality extra: a machine that drops to medium (adaptQuality) loses it first.
+  if (grass) {
+    grass.mesh.visible = gfx.quality !== "medium";
+    if (grass.mesh.visible) grass.update(gfx.renderer, camera.position.x, camera.position.z);
+  }
   updateNav(dt);
   gfx.follow(me.pos.x, me.pos.z);
   mirrors.active = !!car && cockpit && !params.has("nomirror");
