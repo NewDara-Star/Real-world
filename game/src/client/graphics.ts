@@ -1,5 +1,5 @@
 import * as THREE from "three/webgpu";
-import { builtinAOContext, mrt, normalView, pass, screenUV } from "three/tsl";
+import { builtinAOContext, pass, screenUV, vec3, vec4 } from "three/tsl";
 import { nightUniform } from "./facade";
 import { ao } from "three/addons/tsl/display/GTAONode.js";
 import { bloom } from "three/addons/tsl/display/BloomNode.js";
@@ -84,13 +84,21 @@ export class Graphics {
     this.pipeline = new THREE.RenderPipeline(renderer);
     const scenePass = pass(scene, camera);
     if (this.quality !== "medium") {
-      // Normals + depth pre-pass feed ground-truth ambient occlusion, which
-      // grounds buildings, kerbs and vehicles far better than shadows alone.
+      // A depth pre-pass feeds ground-truth ambient occlusion, which grounds
+      // buildings, kerbs and vehicles far better than shadows alone.
       const prePass = pass(scene, camera);
-      prePass.setMRT(mrt({ output: normalView }));
-      const aoPass = ao(prePass.getTextureNode("depth"), prePass.getTextureNode(), camera);
+      // Normals rebuilt from depth (GTAONode allows a null normal node; the
+      // types lag). An MRT normal output here went black on the city: the
+      // world material's colorNode leaks into the pre-pass's normal output on
+      // Metal, so every city pixel read as fully occluded.
+      const aoPass = ao(prePass.getTextureNode("depth"), null as unknown as THREE.Node, camera);
       aoPass.resolutionScale = this.quality === "ultra" ? 1 : 0.5;
       scenePass.contextNode = builtinAOContext(aoPass.getTextureNode().sample(screenUV).r);
+      // Debug: ?aoview draws the ambient-occlusion term instead of the scene.
+      if (new URLSearchParams(location.search).has("aoview")) {
+        this.pipeline.outputNode = vec4(vec3(aoPass.getTextureNode().sample(screenUV).r), 1);
+        return;
+      }
     }
     const color = scenePass.getTextureNode();
     const glow = bloom(color, 0.06, 0.3, 0.98);

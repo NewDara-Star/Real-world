@@ -62,7 +62,11 @@ Runs at 2db1189, 30 shots each, every 15 s: happy, idiot, sad at
 01:30, so it covers dusk; started at the real clock, 23:00, it would miss it).
 Shot numbers are `game/shots/<run>/NNN` (kept on the Mac, not committed).
 
-- **City near-black in daylight on the Mac: the GTAO pass at "high".**
+- **City near-black in daylight on the Mac: the GTAO pass at "high". Fixed**
+  (GTAO now rebuilds normals from depth; the MRT normal pre-pass read the
+  world material's colorNode on Metal, so AO was 0 on every city pixel: shown
+  with `?aoview`, and by switching the material's nodes off one at a time).
+  Five launches at high afterwards: 43.3-43.5, all correct. The history:
   Deterministic, three launches each at the Finglas spawn, 13:00:
   `quality=medium` 43.7, 43.7, 43.7 (correct); `quality=high` 9.1, 9.1, 9.1
   (lower-half brightness). At high, buildings, ground, kerbs and garden
