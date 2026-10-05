@@ -50,3 +50,13 @@ Frontiers in Virtual Reality (2020), DOI 10.3389/frvir.2020.561558.
 in the shape of Dublin's Wright Gemini double-deckers (proportions from CC
 photos on Wikimedia Commons, looked at and not stored). No third-party
 geometry or textures, no logos or livery graphics.
+
+`car_traffic_1.glb` (hatchback), `car_traffic_2.glb` (saloon),
+`car_traffic_3.glb` (estate), `car_traffic_4.glb` (compact SUV),
+`car_traffic_5.glb` (small panel van): based on "Generic passenger car pack"
+(https://sketchfab.com/3d-models/generic-passenger-car-pack-20f9af9b8a404d5cb022ac6fe87f21f5)
+by Comrade1280 (https://sketchfab.com/comrade1280), licensed CC-BY-4.0
+(http://creativecommons.org/licenses/by/4.0/). Modified by
+`tools/assets/build_traffic_cars.py`: turned and scaled to real class lengths,
+wheels renamed and re-pivoted, lights split into the game's materials, the
+minivan's rear glass painted over as a panel van.
