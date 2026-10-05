@@ -8,12 +8,19 @@ import { check, done, within } from "./check";
 interface Node { name?: string; translation?: number[]; mesh?: number; children?: number[] }
 
 /** The glTF JSON chunk of a .glb in public/models. */
-function gltf(file: string): { nodes: Node[]; materials?: { name?: string }[] } {
+function gltf(file: string): { nodes: Node[]; materials?: { name?: string }[]; meshes?: { primitives: { attributes: { POSITION: number } }[] }[]; accessors?: { min: number[]; max: number[] }[] } {
   const b = readFileSync(new URL(`../public/models/${file}.glb`, import.meta.url));
   const len = b.readUInt32LE(12);
   return JSON.parse(b.subarray(20, 20 + len).toString("utf8"));
 }
 const node = (g: { nodes: Node[] }, name: string) => g.nodes.find((n) => n.name === name);
+/** Where a named mesh's middle sits along the car, m (its accessor bounds plus the node's offset). */
+function meshZ(g: { nodes: Node[]; meshes?: { primitives: { attributes: { POSITION: number } }[] }[]; accessors?: { min: number[]; max: number[] }[] }, name: string) {
+  const n = node(g, name);
+  if (!n || n.mesh === undefined || !g.meshes || !g.accessors) return NaN;
+  const a = g.accessors[g.meshes[n.mesh].primitives[0].attributes.POSITION];
+  return (a.min[2] + a.max[2]) / 2 + (n.translation?.[2] ?? 0);
+}
 
 const pole = gltf("traffic_signal_pole");
 within("the signal pole's HeadMount is at the head's height (2.5 m)", node(pole, "HeadMount")?.translation?.[1] ?? 0, 2.45, 2.55, " m");
@@ -33,6 +40,8 @@ for (const f of ["car_traffic_1", "car_traffic_2", "car_traffic_3", "car_traffic
   // Front is +Z in glTF: the front wheels are ahead of the rear ones, the left ones on +X.
   const z = (n: string) => node(g, n)?.translation?.[2] ?? 0, x = (n: string) => node(g, n)?.translation?.[0] ?? 0;
   check(`${f}: faces +Z with its left side on +X`, z("WheelFL") > z("WheelRL") && x("WheelFL") > 0 && x("WheelFR") < 0);
+  // The wheels are named by where they are, so they can't tell a body built backwards: its headlights can (origin midway between the axles).
+  check(`${f}: headlights at the front (+Z)`, meshZ(g, "Headlights") > 0.5, `${meshZ(g, "Headlights").toFixed(2)} m`);
 }
 // Paint the game can tint per car (trafficnet.ts PAINTS): every car but the black SUV.
 const paintOf = (f: string) => (gltf(f).materials ?? []).map((m) => m.name ?? "").filter((n) => n.startsWith("CarPaint"));

@@ -61,7 +61,8 @@ slot into the order below:
   player who is waiting (near a stop line, in a junction, in a queue); a
   player pulled in to the kerb is passed after 3 s; one stopped in the lane
   gets a honk, then is passed at 8 s; only with the oncoming lane clear. 0
-  overtakes of a waiting player in the same 80 minutes (`tests/overtake.test.mts`).
+  overtakes of a waiting player in the same 80 minutes (`tests/overtake.test.mts`);
+  headless only so far, not yet re-run in the app.
   Still open: traffic cars closing into the player, 5 contacts in those 80
   minutes, mostly from behind or inside junctions. The fix is to check the
   car's path ahead, not a straight line (CARLA's Traffic Manager extends each
@@ -71,6 +72,11 @@ slot into the order below:
   white; the taxi takes any paint. The pack is American in style (the taxi is
   a Crown Victoria, not a Dublin Prius or Octavia); fine for now, Irish
   liveries later. The tow truck and the taxi have no brake-light mesh yet.
+  Seen in the running game on the Mac (svc/004-006): the tow truck, driving
+  ahead the right way round. The other four are checked only in Blender
+  previews and by `models.test` (headlights at the front); not yet seen
+  in-game. Their look hasn't been checked against photos of Dublin vehicles
+  or real dimensions (next).
 - **Reference photos:** decided. Look at them to model, never store them
   (`.gitignore` refuses anything in `reference/` but previews), no logos or
   identifying features even for chains like Lidl or Tesco.

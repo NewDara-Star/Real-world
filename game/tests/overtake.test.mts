@@ -61,9 +61,10 @@ function run(sc: Scene, seconds: number) {
       const q = net.at(l, ss, { ...pt });
       return { l, ss, d: Math.hypot(q.x - p.x, q.z - p.z), dot: q.dx * p.dx + q.dz * p.dz };
     }).filter((o) => o.dot < -0.9).sort((a, b) => a.d - b.d)[0];
-    if (back) place(foe, back.l, Math.max(0, back.ss - 50), 9);
+    if (!back) throw new Error("no oncoming lane beside the player");
+    place(foe, back.l, Math.max(0, back.ss - 50), 9);
   }
-  let went = -1, closest = Infinity, wrongSide = 0, stuck = 0;
+  let went = -1, closest = Infinity, wrongSide = 0, stuck = 0, outFacingFoe = 0, foeMet = false;
   for (let f = 0; f < seconds * 30; f++) {
     // A queue: the car ahead of the player doesn't move.
     if (sc.queueAhead) foe.v = 0;
@@ -72,10 +73,18 @@ function run(sc: Scene, seconds: number) {
     if (!car.active) break;
     if (car.mode === "overtake" && went < 0) went = t.time;
     if (Math.abs(car.lat) > 1) wrongSide++;
+    if (sc.oncoming && foe.active) {
+      // Still to pass each other: the oncoming car ahead of ours, coming at it.
+      const fx = Math.sin(car.yaw), fz = Math.cos(car.yaw);
+      const ahead = (foe.x - car.x) * fx + (foe.z - car.z) * fz;
+      if (ahead > 0) {
+        if (Math.abs(car.lat) > 1) outFacingFoe++;
+      } else foeMet = true;
+    }
     stuck = Math.max(stuck, car.blockedByPlayer);
     closest = Math.min(closest, Math.hypot(car.x - player.x, car.z - player.z));
   }
-  return { went, honks: honks.length, closest, wrongSide, stuck, passed: car.s > sc.s + 5 || car.lane !== sc.lane };
+  return { went, honks: honks.length, closest, wrongSide, stuck, outFacingFoe, foeMet, passed: car.s > sc.s + 5 || car.lane !== sc.lane };
 }
 
 const pick = streets.find((l) => {
@@ -108,7 +117,10 @@ if (pick) {
 
   // Tragedy: the player stalled mid-street, a car coming the other way. The car behind waits for it.
   const r = run({ lane: pick, s: mid, oncoming: true }, 40);
-  check("with a car coming the other way, the car behind still never touches the player", r.closest > 2, `closest ${r.closest.toFixed(1)} m`);
+  check("the oncoming car came past", r.foeMet);
+  check("the car behind never pulls out while it's coming", r.outFacingFoe === 0, `${r.outFacingFoe} frames out with it ahead`);
+  check("then goes round once it's by", r.went > 0 && r.passed, `went at ${r.went.toFixed(1)} s`);
+  check("and never touches the player", r.closest > 2, `closest ${r.closest.toFixed(1)} m`);
 }
 
 // The player stops inside a junction, straight across: the car arriving behind waits; nobody goes round through it.
