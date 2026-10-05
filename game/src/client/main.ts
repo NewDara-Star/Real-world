@@ -62,11 +62,12 @@ camera.layers.enable(1); // mirror glass
 mirrors.setFlip(params.get("mirrorflip") === "1");
 let fogFar = gfx.fogFar;
 
-// Clock: real Lagos time (WAT, UTC+1) unless ?time=HH[.MM] is given.
+// Clock: the place's real local time unless ?time=HH[.MM] is given.
 // ?timescale=N speeds it up (60 = one game hour per real minute).
 let gameHours = params.has("time") ? Number(params.get("time")) || 0 : localHours(CITY.tz);
 gfx.setTurbidity(CITY.turbidity);
 const timeScale = Number(params.get("timescale")) || 1;
+gfx.setPlace(CITY.lat, CITY.lon, CITY.tz);
 gfx.setTime(gameHours);
 
 const world = new World(CITY);
@@ -656,7 +657,7 @@ function frame(now: number) {
     const street = world.streetAt(me.pos.x, me.pos.z);
     $("where").textContent = `📍 ${street ? `${street}, ${CITY.label}` : CITY.label}`;
     const hh = Math.floor(gameHours), mm = Math.floor((gameHours % 1) * 60);
-    $("clock").textContent = `${gameHours >= 6.5 && gameHours < 18.75 ? "☀️" : "🌙"} ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+    $("clock").textContent = `${gfx.elevation > -0.833 ? "☀️" : "🌙"} ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
   }
 
   // A gap over a second is the window being hidden or a load, not slowness.

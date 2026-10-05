@@ -95,7 +95,8 @@ Shot numbers are `game/shots/<run>/NNN` (kept on the Mac, not committed).
 - **LED lamps at night:** at medium, no lamp head glows anywhere in
   tragedy-medium/008-028 although `LampLens` maps to `FACADE_LAMP`
   (`models.ts:15`); no light pools on the road (item 16, not built). Also:
-  fully dark already at 18:58 (tragedy-medium/004; Dublin sunset ~19:00),
+  fully dark already at 18:58 (tragedy-medium/004; Dublin sunset ~19:00;
+  fixed: the sun now follows each place's real path, `sun.ts`),
   and lit windows are flat cream rectangles.
 - **Autodrive and people: fixed in the driver, one race left in the walkers.**
   The autodrive only asked "is anyone on the crossing of the link I'm about

@@ -5,6 +5,9 @@ export interface City {
   label: string;
   /** IANA time zone for the real local clock. */
   tz: string;
+  /** Where it is (degrees), for the sun's real path through the day and year. */
+  lat: number;
+  lon: number;
   /** Which side traffic keeps to; the driver sits on the other side. */
   drive: "right" | "left";
   style: "lagos" | "dublin";
@@ -22,6 +25,8 @@ export const CITIES: Record<string, City> = {
     zone: "yaba",
     label: "Yaba",
     tz: "Africa/Lagos",
+    lat: 6.507,
+    lon: 3.373,
     drive: "right",
     style: "lagos",
     // Sun-faded mainland walls; rusty zinc; concrete slabs.
@@ -35,6 +40,8 @@ export const CITIES: Record<string, City> = {
     zone: "finglas",
     label: "Finglas",
     tz: "Europe/Dublin",
+    lat: 53.396,
+    lon: -6.296,
     drive: "left",
     style: "dublin",
     // Red and brown brick, grey pebbledash, cream and white render.
@@ -60,11 +67,11 @@ export async function resolveCity(zone: string | null): Promise<City> {
   if (zone && CITIES[zone]) return CITIES[zone];
   if (zone) {
     try {
-      const list = (await fetch("/world/places.json").then((r) => r.json())) as { zone: string; label: string; style: "lagos" | "dublin"; drive: "left" | "right"; tz: string }[];
+      const list = (await fetch("/world/places.json").then((r) => r.json())) as { zone: string; label: string; style: "lagos" | "dublin"; drive: "left" | "right"; tz: string; lat: number; lon: number }[];
       const p = list.find((q) => q.zone === zone);
       if (p) {
         const base = p.style === "dublin" ? CITIES.finglas : CITIES.yaba;
-        return { ...base, zone: p.zone, label: p.label, drive: p.drive, tz: p.tz };
+        return { ...base, zone: p.zone, label: p.label, drive: p.drive, tz: p.tz, lat: p.lat, lon: p.lon };
       }
     } catch {
       // fall through

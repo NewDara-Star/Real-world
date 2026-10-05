@@ -1,6 +1,7 @@
 import * as THREE from "three/webgpu";
 import { builtinAOContext, pass, screenUV, vec3, vec4 } from "three/tsl";
 import { nightUniform } from "./facade";
+import { localDate, solarPosition, utcAtLocal } from "./sun";
 import { ao } from "three/addons/tsl/display/GTAONode.js";
 import { bloom } from "three/addons/tsl/display/BloomNode.js";
 import { smaa } from "three/addons/tsl/display/SMAANode.js";
@@ -16,9 +17,6 @@ export type Quality = "ultra" | "high" | "medium";
 const HAZE = new THREE.Color(0xc9b99c);
 const DUSK = new THREE.Color(0xc98e62);
 const NIGHT = new THREE.Color(0x2a3248);
-/** Lagos sits near the equator: sunrise ~06:45, sunset ~18:45 all year. */
-const SUNRISE = 6.75;
-const DAY_LENGTH = 12;
 
 export class Graphics {
   renderer: THREE.WebGPURenderer;
@@ -125,13 +123,23 @@ export class Graphics {
     this.pipeline.render();
   }
 
-  /** Hour of day (0..24, Lagos time). Drives sun, sky, light, fog and night glow. */
+  /** The place and today's date there: the sun follows its real path (sun.ts). */
+  private place!: { lat: number; lon: number; tz: string; date: [number, number, number] };
+  /** Set before the first setTime. */
+  setPlace(lat: number, lon: number, tz: string) {
+    this.place = { lat, lon, tz, date: localDate(tz) };
+  }
+
+  /** Sun's height above the horizon now, degrees (negative at night). */
+  elevation = 0;
+  /** Hour of day on the place's clock (0..24). Drives sun, sky, light, fog and night glow. */
   hours = 15;
   setTime(hours: number) {
     this.hours = ((hours % 24) + 24) % 24;
-    const t = (this.hours - SUNRISE) / DAY_LENGTH; // 0 at sunrise, 1 at sunset
-    const elev = 72 * Math.sin(Math.PI * t); // degrees; negative at night
-    const az = THREE.MathUtils.degToRad(90 + 180 * Math.min(1.2, Math.max(-0.2, t))); // east -> west via south... north of equator: via south
+    const p = this.place;
+    const pos = solarPosition(p.lat, p.lon, utcAtLocal(p.tz, ...p.date, this.hours));
+    const elev = (this.elevation = pos.elevation);
+    const az = THREE.MathUtils.degToRad(pos.azimuth);
     const phi = THREE.MathUtils.degToRad(90 - Math.max(-12, elev));
     // World axes: x east, z south. Azimuth clockwise from north (-z).
     this.sunDir.set(Math.sin(az) * Math.sin(phi), Math.cos(phi), -Math.cos(az) * Math.sin(phi));
