@@ -181,6 +181,85 @@ Shot numbers are `game/shots/<run>/NNN` (kept on the Mac, not committed).
 - **House number search:** "48 Melville Way" answers "Melville Way (no. 48
   isn't mapped)" and offers the street: OSM's gap, as designed.
 
+## Look audit: vehicles, buildings, roads (research 23-25, 2026-10-05)
+
+Checked against real Dublin (the Irish Traffic Signs Manual, DMURS, SIMI,
+NTA, OSM tags, DCC's Finglas strategy, CC photos looked at only), how games
+and open renderers do it (OSM2World, Streets GL, osm2streets), and our own
+code and the Mac screenshots. Ranked by what hurts most from the driver's
+seat, test accuracy first. Cost S/M/L. Nothing below has been built yet.
+
+1. **Signals can't be seen from the stop line** (roads, M). One pole per
+   approach at the kerb, the stop line 0.2 m past it: the head is about
+   30-40° above a stopped driver's eye (geometry; not yet checked in the
+   cockpit). Irish layout: stop line 1-2 m before the near-side signal and
+   a second signal on the far side.
+2. **Junction markings are the UK pattern** (roads, S). Yield line should be
+   one 200 mm line, 1 m dash/1 m gap (ours two 150 mm lines, 0.6/0.3); stop
+   line 200 mm (ours 300); missing yield triangles, STOP text, the solid
+   centre line for 20 m before stop/yield lines, roundabout entry and island
+   lines, mini-roundabout arrows.
+3. **Houses wear shopfronts** (buildings, S). Every wall within 15 m of a
+   main road plus one building in three on estates gets shutters: about
+   5,000 against about 350 commercial buildings in OSM. Use Overture class,
+   OSM shop tags and places, and only the road-facing wall.
+4. **Line rhythm and too many centre lines** (roads, S). Town centre lines
+   3 m/3 m (ours 3/6), lane lines 4/8 and 2/2 before junctions (ours 2/4);
+   no centre line under 5 m wide or where OSM says none (56 roads).
+5. **Nothing for cars and glass to reflect** (vehicles, S-M). Hemisphere
+   light only, no environment map, no clearcoat, near-black glass: dark
+   cars are black blobs close up. Sky as `scene.environment`, clearcoat
+   paint, lighter reflective glass (the player's car gains too).
+6. **Gaps at every bend** (roads, S). Road and footpath strips are unjoined
+   quads; a wedge opens on the outside of bends and the grass shows
+   (likely the green spike). Junction footpath corners have no kerb face;
+   roundabout islands sit flush.
+7. **Storeys, windows and heights** (buildings, S-M). Fixed 3.2 m floors on
+   a 5.6 m wall cut upper windows at the eaves; windows wrap corners and
+   sit on gables and party walls; heights jump within a terrace (a random
+   15% at 8.4 m: one house in seven three storeys where OSM says one in
+   45). Storey = wall height / levels, whole bays, a front/side/party role
+   per wall (one source with `gardens.ts`), levels x 2.7 + 0.3 m.
+8. **Traffic is unlit and some lights are split wrong** (vehicles, S). No
+   head, running or tail lamps at night; the taxi sign and truck beacon
+   blink as indicators, the bin lorry's "brake lights" are on its sides,
+   tow and taxi have none. Test every lamp's place, not only headlights.
+9. **Two sizes for every car** (vehicles, S). `KINDS` says 4.3 x 1.8 for
+   all cars; the models are 4.05-4.69 m. Read sizes from the model bounds.
+10. **Terraces as rows of pyramids** (buildings, M). 91% of house
+    footprints share a wall; group them in the bake, one roof per terrace
+    (hips only at free ends, OSM2World's technique), finish per terrace and
+    paint per house. Comes before the house kits.
+11. **Crossings** (roads, S-M). Irish signal crossings have two solid
+    100 mm lines (ours dotted studs); zebras lack edge lines, give-way line,
+    zig-zags, Belisha beacons; no dropped kerbs or tactile paving anywhere.
+    About 40 OSM crossings may be counted as zebras wrongly (unfair
+    "failed to yield"): check on photos.
+12. **Brick vs render** (buildings, S). 44% brick; Corporation Finglas is
+    mostly painted dashed render, and our render texture is smooth plaster,
+    not pebbledash.
+13. **Surface** (roads, S-M). 244 of 804 residential roads are concrete in
+    OSM, all drawn asphalt; asphalt too bright (0.23 vs 0.10-0.18 aged),
+    paint too clean; no gullies, manholes, patches.
+14. **Markings vanish at night** (roads, S-M). No retroreflection from the
+    headlights (tragedy/020). EN 1436 figures quoted from memory: check.
+15. **Fish-scale moiré** (roads, M). Suspects: atlas bleeding past mip 3,
+    3 m asphalt tiling, no roughness correction for normal maps, SMAA
+    only. Texture array (Streets GL), anti-tiling, temporal AA.
+16. **Vehicles wrong for Ireland** (vehicles, S-L). Taxi needs the Irish
+    roof sign and door decals (S); the SUV is a shrunk always-black US
+    Tahoe; US van, pickup and bin lorry (3.22 m wide). Bus: add TFI green
+    livery and a destination display (S). No drivers, no grime, front wheels
+    don't steer.
+17. **Business parks look like flats** (buildings, S-M): block base,
+    cladding, roller doors. **Edgeless houses** (S-L): fascias and shared
+    chimneys first, then the kits. **Black windows** (M): interior mapping
+    (roadmap 13).
+
+Owner's calls: number plate format (fictional numbers in the real Irish
+layout?), a plain green postal van, and where lane widths come from (OSM
+has none for Finglas). Signs also sit about 0.6 m low.
+
 ## Now
 
 The research in `research/09`–`15` (open-source sims, Forza/AC/iRacing/BeamNG,
