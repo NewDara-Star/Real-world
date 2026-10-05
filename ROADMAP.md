@@ -143,8 +143,8 @@ Shot numbers are `game/shots/<run>/NNN` (kept on the Mac, not committed).
   stationary (tragedy/017-030): faults should not accrue at a standstill
   from being pushed. 18:43 already looks like night (tragedy/003); sunset in
   Dublin on 4 Oct is about 19:00.
-- **Screens:** the autodrive's player car is the green box, not the glTF
-  hatchback (manual driving shows the hatchback); Wheel check opens over the
+- **Screens:** the autodrive's player car was the green box (fixed: it
+  got in before the car model loaded); Wheel check opens over the
   view whenever the G29 is plugged in and covers every shot; the autodrive
   label overlaps the sat-nav's second line. Console: 54 TSL "return in inline
   Fn" warnings and missing Rocketbox bone tracks (Bip01_*) for the clips.

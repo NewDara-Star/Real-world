@@ -834,6 +834,12 @@ autoLabel.style.cssText = "position:fixed;top:56px;left:50%;transform:translateX
 async function startAutodrive(mode: AutoMode) {
   enterBtn.click();
   while (!physicsReady()) await new Promise((r) => setTimeout(r, 200));
+  // The robot gets in straight away, before a person ever could: wait for the
+  // car model too, or it drives the box stand-in. A model that fails to load
+  // resolves null (the box); one that stalls gets 20 s, said on screen.
+  autoLabel.textContent = "AUTODRIVE: waiting for the car model…";
+  document.body.append(autoLabel);
+  await Promise.race([preloadCarModel(), new Promise((r) => setTimeout(r, 20000))]);
   enterVehicle("car");
   if (!car || !world.net || !navigator_) {
     autoLabel.textContent = "AUTODRIVE needs a place with a road network";
