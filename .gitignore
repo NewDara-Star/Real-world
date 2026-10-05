@@ -16,3 +16,4 @@ reference/**
 
 # Python bytecode
 __pycache__/
+assets-src/
