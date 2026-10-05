@@ -134,8 +134,14 @@ function bus() {
   ]);
 }
 
-/** Vehicle kinds: the box drawn until a model loads, the Dublin model that replaces it (public/models), size and share of the fleet. */
-const KINDS = [
+/**
+ * Vehicle kinds: the box drawn until a model loads, the Dublin model that
+ * replaces it (public/models), size and share of the fleet. `livery` keeps a
+ * kind in one colour (service vehicles are white fleet vehicles, not private
+ * colours); `bus` keeps it to the bigger roads. The shares are a guess, not a
+ * count: mostly cars, a few vans and taxis, the odd lorry.
+ */
+const KINDS: { tpl: () => ReturnType<typeof makeTemplate>; model: string; len: number; w: number; n: number; livery?: number; bus?: boolean }[] = [
   { tpl: () => carTemplate(0xf2f2f2), model: "car_traffic_1", len: 4.3, w: 1.8, n: 10 },
   { tpl: () => carTemplate(0x1f3b73), model: "car_traffic_2", len: 4.3, w: 1.8, n: 8 },
   { tpl: () => carTemplate(0x8b1e1e), model: "car_traffic_3", len: 4.3, w: 1.8, n: 6 },
@@ -143,8 +149,14 @@ const KINDS = [
   { tpl: () => carTemplate(0x9aa3ab), model: "car_traffic_1", len: 4.3, w: 1.8, n: 9 },
   { tpl: () => carTemplate(0x3d6b47), model: "car_traffic_2", len: 4.3, w: 1.8, n: 4 },
   { tpl: () => van(0xeeeeee), model: "car_traffic_5", len: 5.0, w: 1.9, n: 6 },
-  { tpl: () => bus(), model: "bus_dublin_dd", len: 10.8, w: 2.5, n: 2 },
+  { tpl: () => bus(), model: "bus_dublin_dd", len: 10.8, w: 2.5, n: 2, bus: true },
+  { tpl: () => carTemplate(0xeeeeec), model: "car_service_taxi", len: 4.7, w: 1.85, n: 4 },
+  { tpl: () => van(0xeeeeec), model: "car_service_van", len: 5.3, w: 2.0, n: 3, livery: 0xeeeeec },
+  { tpl: () => van(0xeeeeec), model: "car_service_truck", len: 6.6, w: 2.2, n: 1, livery: 0xeeeeec },
+  { tpl: () => van(0xeeeeec), model: "car_service_tow", len: 7.2, w: 2.4, n: 1, livery: 0xeeeeec },
+  { tpl: () => van(0xeeeeec), model: "car_service_bin_lorry", len: 9.4, w: 2.5, n: 1, livery: 0xeeeeec },
 ];
+const LIVERY = KINDS.map((k) => (k.livery === undefined ? null : new THREE.Color(k.livery)));
 /**
  * Paint colours for the traffic models' CarPaint parts, repeated to set their
  * share. The weights are a guess, not measured: greys and silvers, black,
@@ -164,6 +176,20 @@ const SIM_RADIUS = 420;
 const SPAWN_MIN = 70;
 const PED_RADIUS = 210;
 const LOOKAHEAD = 90;
+/**
+ * The player counts as waiting at a junction within this of their lane's end,
+ * m (Autoware ignores stopped cars 20 m before a light or crossing; ours also
+ * covers give-ways and leaves the passing car room to get back in)...
+ */
+const WAIT_NEAR_END = 40;
+/** ...or in a queue with a vehicle this close ahead, m. */
+const WAIT_QUEUE = 20;
+/** Pulled in this far toward the kerb from the lane centre counts as parked, m (Autoware's th_offset_from_centerline). */
+const PARKED_OFFSET = 1.0;
+/** Seconds behind a parked player before going round (Autoware's th_stopped_time)... */
+const PASS_PARKED_AFTER = 3;
+/** ...and behind one stopped in the lane for no reason: honk at 4 s, wait, then go round. */
+const OVERTAKE_AFTER = 8;
 
 export class NetTraffic {
   group = new THREE.Group();
@@ -198,6 +224,16 @@ export class NetTraffic {
   private player: PlayerState = { x: 1e9, z: 1e9, yaw: 0, speed: 0, driving: false };
   private playerLane = -1;
   private playerApproach: { lane: Lane; t: number } | null = null;
+  /**
+   * When traffic may pass the stopped player, Autoware's rules for a stopped
+   * vehicle (static obstacle avoidance, research 21): never while it's
+   * waiting (near the end of its lane: a stop line, a light, a give-way,
+   * people crossing; in a junction; in a queue); soon if it's pulled in to
+   * the kerb (parked); otherwise only after the driver behind has honked
+   * and waited.
+   */
+  private playerWaiting = false;
+  private playerParked = false;
   private m = new THREE.Matrix4();
   private wm = new THREE.Matrix4();
   private wr = new THREE.Matrix4();
@@ -400,13 +436,14 @@ export class NetTraffic {
       if (d2 > (SIM_RADIUS * 0.9) ** 2 || d2 < SPAWN_MIN * SPAWN_MIN) continue;
       if ((this.onLane.get(l.id) ?? []).some((o) => Math.abs(o.s - s) < 14)) continue;
       // Buses only on bigger roads.
-      if (KINDS[c.kind].len > 8 && l.speed < 13) continue;
+      if (KINDS[c.kind].bus && l.speed < 13) continue;
       c.lane = l;
       c.s = s;
       c.via = -1;
       c.v0f = 0.88 + this.rand() * 0.2;
       c.T = 1.1 + this.rand() * 0.7;
-      c.a = KINDS[c.kind].len > 8 ? 1.0 : 1.4 + this.rand() * 0.6;
+      // Lorries and buses pull away slowly.
+      c.a = KINDS[c.kind].len > 6 ? 1.0 : 1.4 + this.rand() * 0.6;
       c.b = 2.4 + this.rand() * 0.8;
       c.v = l.speed * c.v0f * 0.7;
       c.link = this.pickLink(l);
@@ -469,6 +506,8 @@ export class NetTraffic {
   private locatePlayer() {
     this.playerLane = -1;
     this.playerApproach = null;
+    this.playerWaiting = false;
+    this.playerParked = false;
     const pl = this.player;
     if (!pl.driving) return;
     const hit = this.net.locate(pl.x, pl.z, pl.yaw, ALLOW_CAR);
@@ -477,6 +516,14 @@ export class NetTraffic {
     if (hit.lane.kind === LaneKind.Road && hit.lane.out.length) {
       this.playerApproach = { lane: hit.lane, t: (hit.lane.length - hit.s) / Math.max(pl.speed, 0.5) };
     }
+    const fx = Math.sin(pl.yaw), fz = Math.cos(pl.yaw);
+    const queued = this.cars.some((o) => {
+      if (!o.active) return false;
+      const rx = o.x - pl.x, rz = o.z - pl.z, ahead = rx * fx + rz * fz;
+      return ahead > 0 && ahead < WAIT_QUEUE && Math.abs(rx * fz - rz * fx) < 2;
+    });
+    this.playerParked = hit.lat * (this.keepLeft ? 1 : -1) >= PARKED_OFFSET;
+    this.playerWaiting = hit.lane.junction >= 0 || hit.lane.kind !== LaneKind.Road || hit.lane.length - hit.s < WAIT_NEAR_END || queued;
   }
 
   /** Is some vehicle (or the player) inside, or about to enter, link k? */
@@ -632,7 +679,7 @@ export class NetTraffic {
     c.s += c.v * dt;
     c.wait = c.v < 0.2 ? c.wait + dt : 0;
 
-    if (c.blockedByPlayer > 4 && c.honk <= 0) {
+    if (c.blockedByPlayer > 4 && c.honk <= 0 && !this.playerWaiting) {
       this.ev.honk(c.x, c.z, "car");
       c.honk = 7;
     }
@@ -697,6 +744,8 @@ export class NetTraffic {
       return;
     }
     if (c.blockedByPlayer < 3) return;
+    // A waiting player is waited for (a honk at most); only a car stopped for no reason gets passed, and only after a while.
+    if (this.playerWaiting || c.blockedByPlayer < (this.playerParked ? PASS_PARKED_AFTER : OVERTAKE_AFTER)) return;
     if (this.changeLane(c)) return;
     const e = c.lane.edge >= 0 ? this.net.edges[c.lane.edge] : null;
     if (e && e.flags & EDGE_TWO_WAY && this.oncomingClear(c)) {
@@ -1013,7 +1062,7 @@ export class NetTraffic {
         if (role.light === "brake") mesh.setColorAt(vc[c.kind], lights.brake ? BRAKE_ON : BRAKE_OFF);
         else if (role.light) mesh.setColorAt(vc[c.kind], blink && lights.indicator === (role.light === "left" ? -1 : 1) ? AMBER_ON : AMBER_OFF);
         // Each car keeps one paint colour: chosen by its place in the fleet, not its draw slot.
-        else mesh.setColorAt(vc[c.kind], PAINTS[(i * 7919) % PAINTS.length]);
+        else mesh.setColorAt(vc[c.kind], LIVERY[c.kind] ?? PAINTS[(i * 7919) % PAINTS.length]);
       });
       vc[c.kind]++;
     });

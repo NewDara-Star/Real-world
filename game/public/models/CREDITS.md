@@ -61,6 +61,17 @@ by Comrade1280 (https://sketchfab.com/comrade1280), licensed CC-BY-4.0
 wheels renamed and re-pivoted, lights split into the game's materials, the
 minivan's rear glass painted over as a panel van.
 
+`car_service_van.glb` (panel van), `car_service_bin_lorry.glb` (bin lorry),
+`car_service_truck.glb` (utility truck), `car_service_tow.glb` (flatbed tow
+truck), `car_service_taxi.glb` (taxi): based on "Generic civil service
+vehicles pack"
+(https://sketchfab.com/3d-models/generic-civil-service-vehicles-pack-8ff2a13f30914932a70c7950cfa58465)
+by Comrade1280 (https://sketchfab.com/comrade1280), licensed CC-BY-4.0
+(http://creativecommons.org/licenses/by/4.0/). Modified by
+`tools/assets/build_service_vehicles.py`: lettering decals removed, wheels
+cut out of the body mesh and named, turned and scaled to real lengths, lights
+split into the game's materials, paint made tintable.
+
 Street trees near the player (`game/src/client/trees.ts`): generated at run
 time by ez-tree (https://github.com/dgreenheck/ez-tree, npm
 `@dgreenheck/ez-tree`) by Daniel Greenheck, MIT. Its bundled bark textures

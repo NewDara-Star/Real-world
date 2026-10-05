@@ -96,5 +96,10 @@ check("no kind draws more cars than it has room for", withinBudget);
 check("a car's body and lights are drawn at the same place", sameMatrices);
 check("its wheels turn about their own hubs (the hub stays put on the car)", wheelsOnAxle);
 check("and they do turn: rolled wheels aren't square with the body", turned > 0, `${turned} turned`);
+// Service vehicles wear their fleet's colour, not a private car's: every one of a livery kind the same.
+const white = new THREE.Color(0xeeeeec);
+const van = VEHICLE_MODELS.indexOf("car_service_van"), vanPaint = traffic.vehicleParts(van)[0];
+const vans = Array.from({ length: vanPaint.count }, (_, i) => vanPaint.getColorAt(i, new THREE.Color()));
+check("service vans are all the fleet's white", vans.length > 0 && vans.every((v) => Math.abs(v.r - white.r) + Math.abs(v.g - white.g) + Math.abs(v.b - white.b) < 1e-4), `${vans.length} vans`);
 check("each car keeps its colour as cars come and go (its draw slot moved " + moved + " times)", moved > 0 && changed === 0, `${changed} changes over ${colourOf.size} cars`);
 done();

@@ -23,7 +23,9 @@ within("and out over the road on the arm (+Z, ~1.5 m)", node(lamp, "LampHead")?.
 const head = gltf("traffic_signal_head");
 check("the signal head has its three lenses", ["LensRed", "LensAmber", "LensGreen"].every((n) => node(head, n)?.mesh !== undefined));
 
-for (const f of ["car_traffic_1", "car_traffic_2", "car_traffic_3", "car_traffic_4", "car_traffic_5", "bus_dublin_dd"]) {
+const SERVICE = ["car_service_van", "car_service_bin_lorry", "car_service_truck", "car_service_tow", "car_service_taxi"];
+// The service pack's wheels were cut out of the body by shape (build_service_vehicles.py); the same checks hold.
+for (const f of ["car_traffic_1", "car_traffic_2", "car_traffic_3", "car_traffic_4", "car_traffic_5", "bus_dublin_dd", ...SERVICE]) {
   const g = gltf(f);
   const wheels = ["WheelFL", "WheelFR", "WheelRL", "WheelRR"].map((n) => node(g, n));
   check(`${f}: four named wheels, pivots off the origin at the wheel centres`, wheels.every((w) => w?.mesh !== undefined && Math.hypot(...(w.translation ?? [0, 0, 0])) > 0.5));
@@ -37,4 +39,5 @@ const paintOf = (f: string) => (gltf(f).materials ?? []).map((m) => m.name ?? ""
 check("cars 1-3 and the van carry tintable CarPaint", ["car_traffic_1", "car_traffic_2", "car_traffic_3", "car_traffic_5"].every((f) => paintOf(f).includes("CarPaint")));
 check("the van's painted-over panels are paint too, so they take the same colour", paintOf("car_traffic_5").includes("CarPaintPanel"));
 check("the black SUV keeps its own paint (it can't be told from its black trim)", paintOf("car_traffic_4").length === 0);
+check("the service vehicles carry CarPaint (the game sets their livery)", SERVICE.every((f) => paintOf(f).includes("CarPaint")));
 done();

@@ -51,6 +51,26 @@ slot into the order below:
   furniture is correct in size and names but plain. Next pass uses reference
   photos per asset. Buildings are boxes with one repeated window and trees are
   low-poly blobs (house kits §6 and trees §5 in `docs/blender-assets.md`).
+- **Traffic on the wrong side of the road (owner, 2026-10-05):** found and
+  fixed. The lanes are left-hand and the cars kept to them; the fault was the
+  "go round the player" move: a car stuck 3 s behind the stopped player pulled
+  into the oncoming lane, which (headless, 80 minutes of autodrive) happened
+  17 times, every one while the player waited at a red light, for people
+  crossing or in a queue (screenshot run svc/005-006 ended in a crash and a
+  fail). Now Autoware's static-obstacle rules (research 21): never round a
+  player who is waiting (near a stop line, in a junction, in a queue); a
+  player pulled in to the kerb is passed after 3 s; one stopped in the lane
+  gets a honk, then is passed at 8 s; only with the oncoming lane clear. 0
+  overtakes of a waiting player in the same 80 minutes (`tests/overtake.test.mts`).
+  Still open: traffic cars closing into the player, 5 contacts in those 80
+  minutes, mostly from behind or inside junctions. The fix is to check the
+  car's path ahead, not a straight line (CARLA's Traffic Manager extends each
+  car's box along its path, research 21).
+- **Service vehicles:** in traffic. A panel van, bin lorry, utility truck,
+  flatbed tow truck and taxi (Comrade1280's CC-BY civil pack) in the fleet's
+  white; the taxi takes any paint. The pack is American in style (the taxi is
+  a Crown Victoria, not a Dublin Prius or Octavia); fine for now, Irish
+  liveries later. The tow truck and the taxi have no brake-light mesh yet.
 - **Reference photos:** decided. Look at them to model, never store them
   (`.gitignore` refuses anything in `reference/` but previews), no logos or
   identifying features even for chains like Lidl or Tesco.

@@ -590,3 +590,16 @@ to box overlap.
 | traffic-simulation.de (Treiber) | **GPL-3.0** | Techniques only (equations are published) |
 | highD/inD/rounD/exiD, INTERACTION, Argoverse 2, Waymo Open Motion | Non-commercial | Not for calibration of a product; published summary numbers only |
 | NGSIM | US public domain | OK for calibration |
+
+## Addendum 2026-10-05: when to go round a stopped car (Autoware's numbers)
+
+From `autoware_behavior_path_static_obstacle_avoidance_module/config/static_obstacle_avoidance.param.yaml`
+(Apache-2.0; values only): a stopped vehicle at least 1.0 m off the lane
+centre toward the edge (`th_offset_from_centerline`, shiftable ratio 0.8)
+is parked and is avoided; one on the centre is "ambiguous" and needs
+`th_stopped_time` 3 s; anything within 20 m before a traffic light or a
+crossing is never an avoidance target (`front_distance` 20 m); the path may
+use the opposite-direction lane only when it's clear. `trafficnet.ts`
+takes these: never round a player who is waiting (40 m from the lane's end,
+which covers give-ways too, in a junction, or in a queue), 3 s if parked at
+the kerb, honk-then-8 s if stopped in the lane.
