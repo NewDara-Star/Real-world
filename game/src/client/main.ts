@@ -158,7 +158,7 @@ let headYaw = 0;
 let frameNo = 0;
 const eyePos = new THREE.Vector3();
 let headTarget = 0;
-if (DEBUG) Object.assign(window, { __me: me, __remotes: remotes, __world: world, __camera: camera });
+if (DEBUG) Object.assign(window, { __me: me, __remotes: remotes, __world: world, __camera: camera, __gfx: gfx });
 let online = 1;
 let meetId = Number(params.get("meet")) || 0;
 

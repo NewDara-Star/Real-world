@@ -1,5 +1,5 @@
 import * as THREE from "three/webgpu";
-import { Fn, If, abs, attribute, cameraViewMatrix, dFdx, dFdy, dot, float, floor, fract, fwidth, max, min, mix, mod, normalize, normalWorld, positionWorld, select, sin, smoothstep, step, texture, uniform, vec2, vec3, vec4 } from "three/tsl";
+import { Fn, If, abs, attribute, cameraViewMatrix, dFdx, dFdy, dot, float, floor, fract, fwidth, max, min, mix, mod, normalize, normalWorld, normalWorldGeometry, positionWorld, select, sin, smoothstep, step, texture, uniform, vec2, vec3, vec4 } from "three/tsl";
 
 // One shared PBR material for the whole city. Each vertex carries a `facade`
 // attribute (u, v, code, ao). With real textures loaded (CC0 photo scans,
@@ -318,9 +318,14 @@ const makeSurface = (tex: CityTextures | null) => Fn(() => {
   return vec4(c.mul(fac.w), min(rough, 1));
 });
 
+// The mapping helpers below run inside the colour node, where normalWorld is
+// derived from the lit normal, which isn't computed yet: it read as
+// normalize(0) = NaN and blackened every prop and hedge pixel (and the lighting
+// with it). They use the mesh's own normal instead. makeNormal, the normal
+// node itself, keeps normalWorld: there three gives it the geometric normal.
 /** Roof faces: along the eaves and up the slope, in metres. */
 const roofUV = () => {
-  const n = normalWorld;
+  const n = normalWorldGeometry;
   const t = normalize(vec3(n.z.negate(), 0, n.x).add(vec3(1e-4, 0, 0)));
   const sinSlope = max(float(0.25), float(1).sub(n.y.mul(n.y)).sqrt());
   return vec2(dot(positionWorld, t), positionWorld.y.div(sinSlope));
@@ -328,7 +333,7 @@ const roofUV = () => {
 
 /** Prop faces: walls along the face and up, tops east and north, in metres. */
 const propUV = () => {
-  const n = normalWorld;
+  const n = normalWorldGeometry;
   const t = normalize(vec3(n.z.negate(), 0, n.x).add(vec3(1e-4, 0, 0)));
   const up = step(0.7, abs(n.y));
   return mix(vec2(dot(positionWorld, t), positionWorld.y), vec2(positionWorld.x, positionWorld.z.negate()), up);

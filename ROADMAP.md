@@ -85,7 +85,10 @@ Shot numbers are `game/shots/<run>/NNN` (kept on the Mac, not committed).
   Mac at `quality=medium`. Fix: find why AO is ~0 on the facade/ground
   materials (custom `normalNode` vs the pre-pass `normalView`?); confirm
   with five launches at high, brightness per launch.
-- **Garden walls, piers and hedges render black at medium too**
+- **Garden walls, piers and hedges render black at medium too. Fixed:** the
+  prop and hedge mapping read `normalWorld` inside the colour node, where it's
+  normalize(0) = NaN (seen in the generated WGSL via `__gfx.renderer.debug`);
+  they now use `normalWorldGeometry`. History:
   (happy-medium/019 right, happy-medium/024 left: a ~1 m black slab along
   the gardens). Not the models' colour: the walls now carry a white base
   colour (fixed in 57877a2; they had the render's mean albedo, applied twice),
