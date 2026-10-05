@@ -181,6 +181,50 @@ Shot numbers are `game/shots/<run>/NNN` (kept on the Mac, not committed).
 - **House number search:** "48 Melville Way" answers "Melville Way (no. 48
   isn't mapped)" and offers the street: OSM's gap, as designed.
 
+## Rewrite: the game code, module by module, every line referenced (owner, 2026-10-05)
+
+The owner's call after a day of guessed code: rewrite `game/src` (12,800
+lines) from research, every line carrying its source (CLAUDE.md "Every line
+has a reference", enforced by the push review). Kept as they are: research
+notes, the baked worlds and bake pipeline, the CC models and textures, the
+test harness. Each module is replaced in place so the app always runs; its
+tests are rewritten with it (they fail on the old module where it was
+wrong). Old code stays in git history; the signal-placement trial is in
+`git stash` ("signals placement trial").
+
+Each step: read what we have in `research/`, read two or three open
+projects or the standard, write the module with references, test the four
+paths, look at it in the game on the Mac before calling it done.
+
+1. **Shell:** Electron window, renderer and frame loop (`main.cjs`,
+   `graphics.ts`, the loop out of `main.ts`). Sources: Electron and three.js
+   r186 docs. Includes the missing car in the cockpit view (found today).
+2. **Input:** keyboard, pads, the G29 over WebHID with force feedback
+   (`input.ts`, `wheel.ts`, `g29.ts`). Sources: WebHID spec, Logitech's
+   G29 HID reports as documented by open drivers (research 11).
+3. **Road network** (`roadnet.ts`): SUMO .net.xml docs, our bake format.
+4. **Car physics and the player car** (`carphysics.ts`, `drive.ts`,
+   `carmodel.ts`, `mirrors.ts`): Pacejka/Bakker, Rapier docs, published
+   Polo-class figures (research 08).
+5. **Roads and markings** (`roadrender.ts`): TSM ch. 7, DMURS, osm2streets
+   (research 25), lane widths from Tailte Éireann (research 28).
+6. **Signals and signs** (`roadsigns.ts`): TSM ch. 9 and 5 (research 25).
+7. **World and buildings** (`world.ts`, `facade.ts`, `textures.ts`,
+   `gardens.ts`, `streetdetail.ts`, `props.ts`, `trees.ts`, `grass.ts`):
+   research 24, OSM2World, Streets GL.
+8. **Traffic** (`trafficnet.ts`, `traffic.ts`): IDM (Treiber), SUMO's
+   junction model, Autoware (research 21).
+9. **People** (`crowd.ts`, `avatar.ts`): research 20.
+10. **Examiner** (`rules.ts`): RSA test faults (research 13).
+11. **Sat-nav, map, search** (`nav.ts`, `map.ts`, `search.ts`).
+12. **Autodrive** (`autodrive.ts`): Autoware (research 21).
+13. **HUD** (research 27) and **radio** (research 26).
+14. **Sound, sun and night, globe, multiplayer** (`audio.ts`, `sun.ts`,
+    `nightfx.ts`, `globe.ts`, `net.ts`, `server/`), then Lagos.
+
+The look audit below (items 1-17) is done inside these steps, not on the
+old code.
+
 ## Look audit: vehicles, buildings, roads (research 23-25, 2026-10-05)
 
 Checked against real Dublin (the Irish Traffic Signs Manual, DMURS, SIMI,

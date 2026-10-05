@@ -39,6 +39,20 @@ findings into `research/` and say which repo the idea came from. The many
 open city digital twins (research 17, 19) are the model for this: we import,
 we don't hand-build.
 
+## Every line has a reference
+
+Every line of code added or changed in `game/src`, `game/desktop` and
+`tools/` carries a reference comment saying where it came from: the
+standard and clause (`TSM 9.4.14`), the open project, file and licence
+(`Autoware static_obstacle_avoidance.param.yaml th_stopped_time,
+Apache-2.0`), the paper, the dataset, or our own measurement and how it was
+made (`measured: research/28, Tailte Éireann Ways, median of 1,048 ways`).
+A block may share one reference when every line in it follows from that
+source; say so at the top of the block. Plumbing that only wires existing
+pieces together cites the API it uses (`three.js r186 InstancedMesh docs`).
+No source, no line: research first (`research/`), then write. The game
+code is being rewritten module by module under this rule (ROADMAP.md).
+
 ## Solve the real problem
 
 - **First principles, not patches.** Find why something is wrong before

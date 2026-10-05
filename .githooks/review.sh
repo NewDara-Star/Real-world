@@ -31,7 +31,8 @@ the driver's story (is there a Story: paragraph, and does the change do what it 
 words that mean what they say, nothing done behind the driver's back, first principles over patches,
 one source of truth, dead code and stale comments deleted, names, the four test paths
 (happy, sad, idiot-proof, tragedy) for what changed, licences and credits, privacy, honesty
-(nothing claimed as fixed or tested that wasn't), and ROADMAP.md kept current.
+(nothing claimed as fixed or tested that wasn't), ROADMAP.md kept current, and "Every line has a reference":
+block any added code line in game/src, game/desktop or tools/ that has no reference comment on it or on the block it belongs to, or whose reference is vague ("common practice", "tuned", "looks right").
 Lines starting "Review:" in commit messages are the author's answers to earlier findings; accept them when they're reasonable.
 Only block for real, specific problems you can point to in the diff. Style preferences are not findings.
 
