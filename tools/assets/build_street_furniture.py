@@ -457,7 +457,7 @@ def triangles(objs):
     return n
 
 
-def preview(name, lo, hi):
+def preview(name, lo, hi, view=(-0.55, -1.0, 0.35)):
     scene = bpy.context.scene
     scene.render.engine = "BLENDER_EEVEE"
     scene.render.resolution_x = scene.render.resolution_y = 768
@@ -478,7 +478,7 @@ def preview(name, lo, hi):
     cam = bpy.data.objects.new("Cam", bpy.data.cameras.new("Cam"))
     cam.data.lens = 50
     fov = cam.data.angle
-    view = Vector((-0.55, -1.0, 0.35)).normalized()
+    view = Vector(view).normalized()
     cam.location = centre + view * (radius / math.sin(fov / 2) * 1.05)
     cam.rotation_euler = (centre - cam.location).to_track_quat("-Z", "Y").to_euler()
     scene.collection.objects.link(cam)
@@ -521,4 +521,5 @@ def main():
             build(fn)
 
 
-main()
+if __name__ == "__main__":
+    main()

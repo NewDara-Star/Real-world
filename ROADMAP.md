@@ -245,10 +245,17 @@ physics and the driver. `research/15-what-it-takes.md` is the full map.
     stops, post boxes), trees with wind, front garden walls and hedges.
     Models built (`tools/assets/build_street_furniture.py`, in `public/models/`):
     lamp post, signal head and pole, post box, bus stop pole and shelter, wheelie
-    bin, bollard, telecom cabinet, garden wall pier and 1 m section. Not yet
-    placed in the world; when they are, the game draws materials with
-    `extras.surface` (walls, cabinet plinth) from its texture atlas. Trees and
-    hedges still to build.
+    bin, bollard, telecom cabinet, garden wall pier and 1 m section. Placed so
+    far: lamp posts, garden walls, piers and bins (`gardens.ts`,
+    `streetdetail.ts`, drawing `extras.surface` materials from the texture
+    atlas); the rest not yet. Trees and hedges still to build.
+    Bus built (`tools/assets/build_bus.py`, `bus_dublin_dd.glb`, ~5k
+    triangles): two decks of seats behind real window openings,
+    `DestinationBlind`, the car's light materials and indicator names, wheel
+    pivots at their centres. Not yet used by the traffic (still boxes);
+    traffic cars next, from a CC-BY base (owner's decision 2026-10-05:
+    vehicles may start from CC-BY or CC0 models, reworked in Blender and
+    credited).
 16. Night: a top-down light map for street lamps and every car's headlights
     (overlaps take the brighter, not the sum; research 16), wet-road streaks.
 

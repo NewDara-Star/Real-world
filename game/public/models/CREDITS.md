@@ -45,3 +45,8 @@ added, geometry quantised, clips cut down to bone rotations. MIT licence:
 Rocketbox asks that work using it cite: Gonzalez-Franco M. et al., "The
 Rocketbox Library and the Utility of Freely Available Rigged Avatars",
 Frontiers in Virtual Reality (2020), DOI 10.3389/frvir.2020.561558.
+
+`bus_dublin_dd.glb`: modelled for this project by `tools/assets/build_bus.py`,
+in the shape of Dublin's Wright Gemini double-deckers (proportions from CC
+photos on Wikimedia Commons, looked at and not stored). No third-party
+geometry or textures, no logos or livery graphics.
