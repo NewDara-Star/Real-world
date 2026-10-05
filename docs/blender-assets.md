@@ -118,9 +118,15 @@ only commits each asset's `preview.png`. Finished files go in
 - Budget: 5k triangles each (traffic signal 8k).
 
 ### 5. Trees and hedges
-- `tree_ash.glb`, `tree_sycamore.glb`, `tree_cherry.glb`: street-tree sizes
+- `tree_ash.glb`, `tree_sycamore.glb`, `tree_cherry.glb`, `tree_lime.glb`: street-tree sizes
   (6–12 m), leaves as alpha-cut cards with a separate `Leaves` material, trunk
-  `Bark`. Budget: 30k triangles.
+  `Bark`. Budget: 30k triangles. This is the near model; leaves from CC0 sets
+  (ambientCG leaf atlases), not photos of other projects' trees.
+- For distance, bake each tree to an impostor (research 22): render it to a
+  colour + alpha card and a normal card (1024 px, front and side), shown in
+  the game on crossed planes with a sphere-like "volume normal" blended in,
+  so the card shades like a round crown. Files `tree_<species>_card.png` and
+  `tree_<species>_card_normal.png` beside the .glb.
 - `hedge_privet_1m.glb`: a 1 m long, 1.2 m tall privet hedge section that tiles
   end to end.
 
