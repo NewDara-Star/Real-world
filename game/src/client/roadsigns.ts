@@ -120,11 +120,37 @@ function yieldSign() {
   });
 }
 
+const UP = new THREE.Vector3(0, 1, 0);
+const ONE = new THREE.Vector3(1, 1, 1);
+
+/** The plain boxes' head: mounted 2.9 m up, lenses 0.14 m in front of the pole, red/amber/green this far above the mount. */
+const BOX_HEAD = { mount: 2.9, lensZ: 0.14, lensY: [0.42, 0.06, -0.3] };
+
+/**
+ * Where one signal goes, for a kerb point (x, z) whose traffic travels along
+ * yaw: the pole there, the head at the mount height facing back toward that
+ * traffic (its local +Z, the glTF front), and the red, amber and green lamps
+ * at lensY above the mount, lensZ in front of the head's origin.
+ */
+export function signalPlacement(x: number, z: number, yaw: number, head: { mount: number; lensZ: number; lensY: number[] }) {
+  const back = new THREE.Quaternion().setFromAxisAngle(UP, yaw + Math.PI);
+  const headM = new THREE.Matrix4().compose(new THREE.Vector3(x, head.mount, z), back, ONE);
+  return {
+    pole: new THREE.Matrix4().compose(new THREE.Vector3(x, 0, z), new THREE.Quaternion().setFromAxisAngle(UP, yaw), ONE),
+    head: headM,
+    lamps: head.lensY.map((y) => new THREE.Matrix4().compose(new THREE.Vector3(0, y, head.lensZ).applyMatrix4(headM), back, ONE)),
+  };
+}
+
 export class RoadSigns {
   group = new THREE.Group();
   private heads: Head[] = [];
   private lamps!: THREE.InstancedMesh;
   private colors: Float32Array = new Float32Array(0);
+  /** Each signalled approach's kerb point and traffic heading, to re-place the heads when the models load. */
+  private approaches: { x: number; z: number; yaw: number }[] = [];
+  private poleMeshes: THREE.InstancedMesh[] = [];
+  private headMeshes: THREE.InstancedMesh[] = [];
 
   constructor(private net: RoadNet, drive: "left" | "right") {
     const kerbSide = drive === "left" ? 1 : -1;
@@ -133,9 +159,6 @@ export class RoadSigns {
     const poles: THREE.Matrix4[] = [];
     const housings: THREE.Matrix4[] = [];
     const lampMats: THREE.Matrix4[] = [];
-    const q = new THREE.Quaternion();
-    const up = new THREE.Vector3(0, 1, 0);
-    const one = new THREE.Vector3(1, 1, 1);
 
     // ---- traffic lights: one pole per signalled approach, kerb side ----
     for (const e of net.edges) {
@@ -144,24 +167,19 @@ export class RoadSigns {
       const kerb = kerbLane(cars, kerbSide);
       const link = kerb.out.map((k) => net.links[k]).find((k) => k.tl >= 0 && k.dir === "s") ?? kerb.out.map((k) => net.links[k]).find((k) => k.tl >= 0)!;
       const p = kerbPoint(kerb, true, 1.1, kerbSide);
-      q.setFromAxisAngle(up, p.yaw);
-      poles.push(new THREE.Matrix4().compose(new THREE.Vector3(p.x, 0, p.z), q, one));
-      // Head faces back toward approaching traffic.
-      const back = new THREE.Quaternion().setFromAxisAngle(up, p.yaw + Math.PI);
-      housings.push(new THREE.Matrix4().compose(new THREE.Vector3(p.x, 2.9, p.z), back, one));
+      this.approaches.push({ x: p.x, z: p.z, yaw: p.yaw });
+      const at = signalPlacement(p.x, p.z, p.yaw, BOX_HEAD);
+      poles.push(at.pole);
+      housings.push(at.head);
       const base = lampMats.length;
-      for (let i = 0; i < 3; i++) {
-        // Red on top, amber, green; lenses on the face toward traffic.
-        const pos = new THREE.Vector3(p.x - Math.sin(p.yaw) * 0.14, 3.32 - i * 0.36, p.z - Math.cos(p.yaw) * 0.14);
-        lampMats.push(new THREE.Matrix4().compose(pos, back, one));
-      }
+      lampMats.push(...at.lamps); // red on top, amber, green, on the face toward traffic
       this.heads.push({ tl: link.tl, li: link.li, base });
     }
     const poleGeo = new THREE.CylinderGeometry(0.06, 0.07, 3.6, 8).translate(0, 1.8, 0);
     const housingGeo = new THREE.BoxGeometry(0.34, 1.12, 0.24).translate(0, 0.42, 0);
     const lampGeo = new THREE.CircleGeometry(0.11, 14);
-    this.add(poleGeo, poleMat, poles);
-    this.add(housingGeo, housingMat, housings);
+    this.poleMeshes = [this.add(poleGeo, poleMat, poles)];
+    this.headMeshes = [this.add(housingGeo, housingMat, housings)];
     const lampMat = new THREE.MeshBasicNodeMaterial({ color: 0xffffff });
     this.lamps = this.add(lampGeo, lampMat, lampMats);
     this.colors = new Float32Array(lampMats.length * 3);
@@ -173,9 +191,9 @@ export class RoadSigns {
     const sign = (key: string, make: () => THREE.Texture, size: number, x: number, z: number, yaw: number) => {
       let g = byTex.get(key);
       if (!g) byTex.set(key, (g = { tex: make(), mats: [], size }));
-      const face = new THREE.Quaternion().setFromAxisAngle(up, yaw + Math.PI);
-      g.mats.push(new THREE.Matrix4().compose(new THREE.Vector3(x - Math.sin(yaw) * 0.05, 2.1, z - Math.cos(yaw) * 0.05), face, one));
-      signPoles.push(new THREE.Matrix4().compose(new THREE.Vector3(x, 0, z), face, one));
+      const face = new THREE.Quaternion().setFromAxisAngle(UP, yaw + Math.PI);
+      g.mats.push(new THREE.Matrix4().compose(new THREE.Vector3(x - Math.sin(yaw) * 0.05, 2.1, z - Math.cos(yaw) * 0.05), face, ONE));
+      signPoles.push(new THREE.Matrix4().compose(new THREE.Vector3(x, 0, z), face, ONE));
     };
     for (const e of net.edges) {
       const cars = net.carLanes(e);
@@ -216,6 +234,45 @@ export class RoadSigns {
     mesh.frustumCulled = false;
     this.group.add(mesh);
     return mesh;
+  }
+
+  /**
+   * Swap the plain pole and box for the signal models (models.ts
+   * loadSignalModels): the pole's HeadMount gives the head's height, the
+   * head's LensRed/Amber/Green give where the lit lamps sit. The lamps stay
+   * the instanced discs update() colours, moved onto the lenses.
+   */
+  useModels(pole: THREE.Object3D, head: THREE.Object3D) {
+    pole.updateMatrixWorld(true);
+    head.updateMatrixWorld(true);
+    const mount = pole.getObjectByName("HeadMount")?.getWorldPosition(new THREE.Vector3()).y;
+    const lensAt = (name: string) => {
+      const lens = head.getObjectByName(name) as THREE.Mesh | undefined;
+      return lens?.isMesh ? new THREE.Box3().setFromObject(lens) : null;
+    };
+    const lenses = ["LensRed", "LensAmber", "LensGreen"].map(lensAt);
+    if (mount === undefined || lenses.some((b) => !b)) return;
+    const fit = { mount, lensZ: lenses[0]!.max.z + 0.004, lensY: lenses.map((b) => (b!.min.y + b!.max.y) / 2) };
+    const placed = this.approaches.map((a) => signalPlacement(a.x, a.z, a.yaw, fit));
+    const swap = (old: THREE.InstancedMesh[], model: THREE.Object3D, at: THREE.Matrix4[], skip: (name: string) => boolean) => {
+      const parts: THREE.InstancedMesh[] = [];
+      model.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (m.isMesh && !skip(m.name)) parts.push(this.add(m.geometry.clone().applyMatrix4(m.matrixWorld), m.material as THREE.Material, at));
+      });
+      if (!parts.length) return old;
+      for (const o of old) {
+        this.group.remove(o);
+        o.dispose();
+      }
+      return parts;
+    };
+    this.poleMeshes = swap(this.poleMeshes, pole, placed.map((p) => p.pole), () => false);
+    this.headMeshes = swap(this.headMeshes, head, placed.map((p) => p.head), (n) => n.startsWith("Lens"));
+    placed.forEach((p, i) => p.lamps.forEach((m, k) => this.lamps.setMatrixAt(this.heads[i].base + k, m)));
+    this.lamps.geometry.dispose();
+    this.lamps.geometry = new THREE.CircleGeometry((lenses[0]!.max.x - lenses[0]!.min.x) / 2, 16); // the model's lens size
+    this.lamps.instanceMatrix.needsUpdate = true;
   }
 
   /** Light the lamps for the signal programs at time t. Colours above 1 bloom. */

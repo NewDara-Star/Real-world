@@ -102,3 +102,14 @@ export async function loadVehicleModels(files: string[], base = "/models/"): Pro
   };
   return Promise.all(files.map(load));
 }
+
+/** The Irish traffic signal pole and head (traffic_signal_pole.glb, traffic_signal_head.glb), or null if either won't load. */
+export async function loadSignalModels(base = "/models/"): Promise<{ pole: THREE.Object3D; head: THREE.Object3D } | null> {
+  const loader = new GLTFLoader();
+  try {
+    const [pole, head] = await Promise.all(["traffic_signal_pole", "traffic_signal_head"].map((f) => loader.loadAsync(`${base}${f}.glb`)));
+    return { pole: pole.scene, head: head.scene };
+  } catch {
+    return null;
+  }
+}

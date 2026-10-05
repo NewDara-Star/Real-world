@@ -493,8 +493,9 @@ def build(fn):
     reset()
     want = fn()
     objs = list(bpy.context.scene.objects)
+    # Meshes only: an empty's location is its whole point (HeadMount, LampHead), and applying it would zero it.
     for o in objs:
-        o.select_set(True)
+        o.select_set(o.type == "MESH")
     bpy.context.view_layer.objects.active = next(o for o in objs if o.type == "MESH")
     bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
     lo, hi = bounds(objs)

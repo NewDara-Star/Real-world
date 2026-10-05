@@ -10,7 +10,7 @@ import { Net } from "./net";
 import { Traffic } from "./traffic";
 import { NetTraffic, VEHICLE_MODELS } from "./trafficnet";
 import { Crowd } from "./crowd";
-import { loadVehicleModels } from "./models";
+import { loadSignalModels, loadVehicleModels } from "./models";
 import { RoadSigns } from "./roadsigns";
 import { ALLOW_CAR, ALLOW_SERVICE, LaneKind } from "./roadnet";
 import { Examiner, type Fault } from "./rules";
@@ -275,6 +275,11 @@ world
     if (world.net) {
       signs = new RoadSigns(world.net, CITY.drive);
       scene.add(signs.group);
+      // Irish signal poles and heads replace the plain ones once they load.
+      if (CITY.style === "dublin") {
+        const s = signs;
+        void loadSignalModels().then((m) => m && signs === s && s.useModels(m.pole, m.head));
+      }
       if (traffic instanceof NetTraffic) {
         examiner = new Examiner(world.net, traffic);
         examiner.onFault = showFault;
