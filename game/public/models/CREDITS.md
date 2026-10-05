@@ -60,3 +60,9 @@ by Comrade1280 (https://sketchfab.com/comrade1280), licensed CC-BY-4.0
 `tools/assets/build_traffic_cars.py`: turned and scaled to real class lengths,
 wheels renamed and re-pivoted, lights split into the game's materials, the
 minivan's rear glass painted over as a panel van.
+
+Street trees near the player (`game/src/client/trees.ts`): generated at run
+time by ez-tree (https://github.com/dgreenheck/ez-tree, npm
+`@dgreenheck/ez-tree`) by Daniel Greenheck, MIT. Its bundled bark textures
+come from Poly Haven (bark_brown_02, bark_willow_02; CC0) and TextureCan
+(CC0); its leaf textures ship in the MIT package.

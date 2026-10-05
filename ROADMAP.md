@@ -256,8 +256,9 @@ physics and the driver. `research/15-what-it-takes.md` is the full map.
     bin, bollard, telecom cabinet, garden wall pier and 1 m section. Placed so
     far: lamp posts, garden walls, piers and bins (`gardens.ts`,
     `streetdetail.ts`, drawing `extras.surface` materials from the texture
-    atlas); the rest not yet. Trees and hedges still to build: trees as a
-    near model plus baked impostor cards for distance (research 22,
+    atlas); the rest not yet. Trees: done for the near ones (ez-tree ash, oak
+    and aspen, the nearest 160 within 170 m, `trees.ts`); the rest are still
+    low-poly crowns. Next for trees: baked impostor cards for distance (research 22,
     `docs/blender-assets.md` §5), Irish species (ash, sycamore, cherry,
     lime), generated with ez-tree (MIT, research 22) then baked; then roof clutter (HVAC, skylights) from OSM tags on flat roofs.
     Bus built (`tools/assets/build_bus.py`, `bus_dublin_dd.glb`, ~5k

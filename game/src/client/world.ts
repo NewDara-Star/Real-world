@@ -5,6 +5,7 @@ import { GardenPlanner } from "./gardens";
 import { loadStreetModels, type StreetModels } from "./models";
 import { placeProps, TEMPLATES, type Template } from "./props";
 import { StreetDetail, type Barrier, type StreetLamp } from "./streetdetail";
+import { StreetTrees, type TreeSpot } from "./trees";
 import { RoadNet } from "./roadnet";
 import { buildRoadNet } from "./roadrender";
 import { loadCityTextures } from "./textures";
@@ -104,6 +105,7 @@ export class World {
   streetLamps: StreetLamp[] = [];
   /** Front gardens and other near detail, streamed around the player (Dublin places). */
   detail: StreetDetail | null = null;
+  trees: StreetTrees | null = null;
   gardens: GardenPlanner | null = null;
   private models: StreetModels | null = null;
   /** Mapped walls and hedges (metres; heights filled in). */
@@ -244,10 +246,23 @@ export class World {
     }
 
     // Static street furniture, deterministic so every player sees the same city.
+    const treeSpots: TreeSpot[] = [];
     for (const p of placeProps(this, !realLamps)) {
+      // Dublin's street trees are drawn by StreetTrees (real trees near the
+      // player). Trees stand on the ground: placeProps only gives wires a height.
+      if (p.t === "tree" && this.city.style === "dublin") {
+        treeSpots.push({ x: p.x, z: p.z, rot: p.rot, s: p.s });
+        continue;
+      }
       builderFor(p.x, p.z).stamp(TEMPLATES[p.t], p.x, p.z, p.rot, p.s, p.y ?? 0);
       // Remember where each lamp's light lands (the head hangs 1.5 m out on its arm).
       if (p.t === "lamp") this.lamps.push(p.x + Math.sin(p.rot) * 1.5, p.z + Math.cos(p.rot) * 1.5);
+    }
+
+    if (treeSpots.length) {
+      this.trees = new StreetTrees(treeSpots);
+      this.group.add(this.trees.group);
+      void this.trees.loadNear();
     }
 
     const mat = createWorldMaterial(this.tex);
@@ -278,6 +293,7 @@ export class World {
   cull(x: number, z: number, radius: number) {
     this.detail?.update(x, z);
     const r = radius + CHUNK * 0.75;
+    this.trees?.update(x, z, r);
     for (const m of this.chunks) {
       const s = m.geometry.boundingSphere!;
       m.visible = (s.center.x - x) ** 2 + (s.center.z - z) ** 2 < r * r;

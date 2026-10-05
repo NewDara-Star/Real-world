@@ -16,6 +16,7 @@
     "package:mac": "vite build && electron-packager . \"World Drive\" --platform=darwin --arch=arm64 --out=release --overwrite --prune=true --ignore=\"^/(src|public|tools|research|release|node_modules|\\.wrangler)($|/)\""
   },
   "dependencies": {
+    "@dgreenheck/ez-tree": "^1.1.0",
     "@dimforge/rapier3d-compat": "^0.21.0",
     "three": "^0.186.1"
   },
