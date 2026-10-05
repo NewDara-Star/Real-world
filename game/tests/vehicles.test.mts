@@ -16,7 +16,12 @@ function model() {
   g.add(new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.4, 4.3), new THREE.MeshStandardMaterial({ name: "CarPaint" })));
   const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.2), new THREE.MeshStandardMaterial());
   wheel.position.set(0.8, 0.3, 1.3);
+  wheel.name = "WheelFL";
   g.add(wheel);
+  const brake = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.1, 0.05), new THREE.MeshStandardMaterial());
+  brake.position.set(0, 0.8, -2.1);
+  brake.name = "Brakelights";
+  g.add(brake);
   return g;
 }
 const shared = model();
@@ -30,17 +35,18 @@ check("every kind names a model file", VEHICLE_MODELS.every((f) => typeof f === 
 check("a model that didn't load keeps its box", traffic.vehicleParts(0).length === 1 && traffic.vehicleParts(0)[0] === before[0]);
 check("a model with no meshes keeps its box", traffic.vehicleParts(2).length === 1 && traffic.vehicleParts(2)[0] === before[2]);
 const a = traffic.vehicleParts(1), b = traffic.vehicleParts(3);
-check("one model can serve two kinds, each with its own meshes", a.length === 2 && b.length === 2 && a[0] !== b[0] && a[0].geometry !== b[0].geometry);
+check("one model can serve two kinds, each with its own meshes", a.length === 3 && b.length === 3 && a[0] !== b[0] && a[0].geometry !== b[0].geometry);
 check("a model's parts keep their place on the car (the wheel's offset is in its geometry)", (() => {
   a[1].geometry.computeBoundingBox();
   return Math.abs(a[1].geometry.boundingBox!.getCenter(new THREE.Vector3()).z - 1.3) < 1e-6;
 })());
 check("only the paint gets per-car colours (body yes, wheel no)", !!a[0].instanceColor && !a[1].instanceColor);
+check("brake lights get their own unlit material and a colour per car", a[2].material instanceof THREE.MeshBasicNodeMaterial && !!a[2].instanceColor);
 check("the replaced boxes are gone from the scene", before.filter((_, k) => k !== 0 && k !== 2).every((m) => !traffic.group.children.includes(m)));
 
 // A full fleet for a minute: every part of a kind drawn the same number of times, at the same places.
 for (let i = 0; i < 60 * 30; i++) traffic.update(1 / 30, 0, 0);
-let drawn = 0, partsAgree = true, withinBudget = true, sameMatrices = true;
+let drawn = 0, partsAgree = true, withinBudget = true, sameMatrices = true, wheelsOnAxle = true, turned = 0;
 const m0 = new THREE.Matrix4(), m1 = new THREE.Matrix4();
 for (let k = 0; k < kinds; k++) {
   const parts = traffic.vehicleParts(k);
@@ -49,10 +55,15 @@ for (let k = 0; k < kinds; k++) {
     if (p.count !== parts[0].count) partsAgree = false;
     if (p.count > p.instanceMatrix.count) withinBudget = false;
   }
-  for (let i = 0; i < parts[0].count && parts.length > 1; i++) {
+  // The body and the brake lights move together; a wheel turns about its own centre.
+  for (let i = 0; i < parts[0].count && parts.length > 2; i++) {
     parts[0].getMatrixAt(i, m0);
-    parts[1].getMatrixAt(i, m1);
+    parts[2].getMatrixAt(i, m1);
     if (!m0.equals(m1)) sameMatrices = false;
+    parts[1].getMatrixAt(i, m1);
+    const hub = new THREE.Vector3(0.8, 0.3, 1.3);
+    if (hub.clone().applyMatrix4(m1).distanceTo(hub.clone().applyMatrix4(m0)) > 1e-4) wheelsOnAxle = false;
+    if (!m1.equals(m0)) turned++;
   }
 }
 const active = traffic.cars.filter((c) => c.active).length;
@@ -82,6 +93,8 @@ for (let f = 0; f < 90 * 30; f++) {
 check("every active car is drawn once", drawn === active && active > 20, `${drawn} drawn, ${active} active`);
 check("all parts of a kind draw the same number of cars", partsAgree);
 check("no kind draws more cars than it has room for", withinBudget);
-check("a car's parts are drawn at the same place", sameMatrices);
+check("a car's body and lights are drawn at the same place", sameMatrices);
+check("its wheels turn about their own hubs (the hub stays put on the car)", wheelsOnAxle);
+check("and they do turn: rolled wheels aren't square with the body", turned > 0, `${turned} turned`);
 check("each car keeps its colour as cars come and go (its draw slot moved " + moved + " times)", moved > 0 && changed === 0, `${changed} changes over ${colourOf.size} cars`);
 done();

@@ -59,7 +59,38 @@ interface Car {
   x: number;
   z: number;
   yaw: number;
+  /** Speed at the last frame drawn, for the brake lights. */
+  vPrev: number;
+  /** Wheel rotation, radians (grows with distance travelled). */
+  spin: number;
 }
+
+/**
+ * A car's lights from what it's doing: brake lights while slowing harder than
+ * 0.6 m/s² or standing (an automatic held on the brake), and the indicator
+ * (-1 left, 1 right, as the player's) for a turn chosen at the junction ahead,
+ * within 35 m or in it, or for a lane change or overtake under way. A U-turn
+ * signals toward the far side of the road (right when traffic keeps left).
+ */
+export function carLights(c: { v: number; vPrev: number; link: { dir: string } | null; via: number; lane: { length: number }; s: number; lat: number; latTarget: number }, dt: number, keepLeft = true) {
+  const brake = c.v < 0.3 || (dt > 0 && (c.vPrev - c.v) / dt > 0.6);
+  let indicator = 0;
+  if (Math.abs(c.latTarget - c.lat) > 0.3) indicator = c.latTarget > c.lat ? -1 : 1;
+  else if (c.link && (c.via >= 0 || c.lane.length - c.s < 35)) {
+    const d = c.link.dir;
+    indicator = d === "l" || d === "L" ? -1 : d === "r" || d === "R" ? 1 : d === "t" || d === "T" ? (keepLeft ? 1 : -1) : 0;
+  }
+  return { brake, indicator };
+}
+
+/** What a vehicle model's part is, for the per-car drawing: paint, a light, a wheel, or the rest. */
+interface PartRole {
+  light?: "brake" | "left" | "right";
+  /** A wheel: its centre on the car and its radius, so it spins on its own axle. */
+  wheel?: { centre: THREE.Vector3; radius: number };
+}
+const BRAKE_ON = new THREE.Color(4, 0.25, 0.12), BRAKE_OFF = new THREE.Color(0.28, 0.02, 0.02);
+const AMBER_ON = new THREE.Color(4, 1.7, 0.15), AMBER_OFF = new THREE.Color(0.3, 0.14, 0.02);
 
 interface Ped {
   kind: number;
@@ -143,6 +174,9 @@ export class NetTraffic {
   peds: Ped[] = [];
   /** Per vehicle kind, the instanced meshes drawn at every car of that kind: a box, or each part of its model. */
   private vMeshes: THREE.InstancedMesh[][] = [];
+  /** And what each of those parts is (lights light, wheels spin). */
+  private vRoles: PartRole[][] = [];
+  private keepLeft: boolean;
   private wMeshes: THREE.InstancedMesh[] = [];
   /** Human-looking pedestrians once their models have loaded; until then (or if they can't), simple walkers. */
   private crowd: Crowd | null = null;
@@ -165,6 +199,9 @@ export class NetTraffic {
   private playerLane = -1;
   private playerApproach: { lane: Lane; t: number } | null = null;
   private m = new THREE.Matrix4();
+  private wm = new THREE.Matrix4();
+  private wr = new THREE.Matrix4();
+  private wt = new THREE.Matrix4();
   private q = new THREE.Quaternion();
   private up = new THREE.Vector3(0, 1, 0);
   private p3 = new THREE.Vector3();
@@ -179,6 +216,7 @@ export class NetTraffic {
     this.rand = mulberry32(budget.seed ?? Date.now() & 0xffff);
     // Keep left: overtake on the right, and vice versa.
     this.overtakeSide = drive === "left" ? -1 : 1;
+    this.keepLeft = drive === "left";
     const mat = createVertexColorMaterial(0.55, 0.15);
     const total = KINDS.reduce((s, k) => s + k.n, 0);
     KINDS.forEach((k, kind) => {
@@ -188,6 +226,7 @@ export class NetTraffic {
       mesh.frustumCulled = false;
       mesh.castShadow = true;
       this.vMeshes.push([mesh]);
+      this.vRoles.push([{}]);
       this.group.add(mesh);
       for (let i = 0; i < n; i++) this.cars.push(this.blankCar(kind));
     });
@@ -229,7 +268,7 @@ export class NetTraffic {
     return {
       kind, len: k.len, w: k.w, active: false, lane: this.net?.lanes[0] as Lane, s: 0, v: 0, link: null, via: -1,
       v0f: 1, T: 1.4, a: 1.6, b: 2.6, stopDone: 0, go: true, wait: 0, blockedByPlayer: 0, honk: 0,
-      lat: 0, latTarget: 0, mode: "drive", modeT: 0, bumped: 0, x: 1e9, z: 1e9, yaw: 0,
+      lat: 0, latTarget: 0, mode: "drive", modeT: 0, bumped: 0, x: 1e9, z: 1e9, yaw: 0, vPrev: 0, spin: 0,
     };
   }
   private blankPed(kind: number): Ped {
@@ -897,17 +936,34 @@ export class NetTraffic {
       if (!scene || !this.vMeshes[kind]) return;
       const n = this.vMeshes[kind][0].instanceMatrix.count;
       const parts: THREE.InstancedMesh[] = [];
+      const roles: PartRole[] = [];
       scene.updateMatrixWorld(true);
       scene.traverse((o) => {
         const m = o as THREE.Mesh;
         if (!m.isMesh) return;
-        const part = new THREE.InstancedMesh(m.geometry.clone().applyMatrix4(m.matrixWorld), m.material, n);
-        // Paint takes each car's own colour; glass, lights, trim and wheels don't.
-        if ((m.material as THREE.Material).name.startsWith("CarPaint")) part.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3).fill(1), 3);
+        // A part is named by its node (the mesh, or its parent when glTF splits a node into primitives).
+        const name = (m.name.match(/^(Brakelights|Indicator[FR][LR]|Wheel[FR][LR])/) ?? m.parent?.name.match(/^(Brakelights|Indicator[FR][LR]|Wheel[FR][LR])/))?.[1] ?? "";
+        const role: PartRole = {};
+        let material = m.material as THREE.Material;
+        if (name === "Brakelights" || name.startsWith("Indicator")) {
+          // Lights glow (unlit, colours above 1 bloom), each car its own state.
+          role.light = name === "Brakelights" ? "brake" : name[10] === "L" ? "left" : "right";
+          material = new THREE.MeshBasicNodeMaterial();
+        }
+        const geo = m.geometry.clone().applyMatrix4(m.matrixWorld);
+        if (name.startsWith("Wheel")) {
+          geo.computeBoundingBox();
+          const box = geo.boundingBox!;
+          role.wheel = { centre: box.getCenter(new THREE.Vector3()), radius: Math.max(0.1, (box.max.y - box.min.y) / 2) };
+        }
+        const part = new THREE.InstancedMesh(geo, material, n);
+        // Paint takes each car's own colour, lights their own state; glass, trim and wheels don't.
+        if (material.name.startsWith("CarPaint") || role.light) part.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3).fill(1), 3);
         part.count = 0;
         part.frustumCulled = false;
         part.castShadow = true;
         parts.push(part);
+        roles.push(role);
         this.group.add(part);
       });
       if (!parts.length) return;
@@ -916,6 +972,7 @@ export class NetTraffic {
         old.dispose();
       }
       this.vMeshes[kind] = parts;
+      this.vRoles[kind] = roles;
     });
   }
 
@@ -933,16 +990,31 @@ export class NetTraffic {
 
   private render(dt: number) {
     const vc = this.vMeshes.map(() => 0);
+    const blink = Math.floor(this.time * 3) % 2 === 0; // about 1.5 flashes a second
     this.cars.forEach((c, i) => {
       if (!c.active) return;
-      const parts = this.vMeshes[c.kind];
+      const parts = this.vMeshes[c.kind], roles = this.vRoles[c.kind];
       if (vc[c.kind] >= parts[0].instanceMatrix.count) return;
+      const lights = carLights(c, dt, this.keepLeft);
+      c.vPrev = c.v;
+      // Wheels roll with the distance driven (all of a model's wheels share the first one's radius).
+      const wheel = roles.find((r) => r.wheel)?.wheel;
+      if (wheel) c.spin = (c.spin + (c.v * dt) / wheel.radius) % (Math.PI * 2);
       this.m.compose(this.p3.set(c.x, 0.03, c.z), this.q.setFromAxisAngle(this.up, c.yaw), this.one);
-      for (const mesh of parts) {
-        mesh.setMatrixAt(vc[c.kind], this.m);
-        // Each car keeps one colour: chosen by its place in the fleet, not its draw slot.
-        if (mesh.instanceColor) mesh.setColorAt(vc[c.kind], PAINTS[(i * 7919) % PAINTS.length]);
-      }
+      parts.forEach((mesh, k) => {
+        const role = roles[k];
+        if (role.wheel) {
+          // Rolling: turn about the axle (x) through the wheel's own centre.
+          const w = role.wheel;
+          this.wm.makeTranslation(w.centre.x, w.centre.y, w.centre.z).multiply(this.wr.makeRotationX(c.spin)).multiply(this.wt.makeTranslation(-w.centre.x, -w.centre.y, -w.centre.z));
+          mesh.setMatrixAt(vc[c.kind], this.wm.premultiply(this.m));
+        } else mesh.setMatrixAt(vc[c.kind], this.m);
+        if (!mesh.instanceColor) return;
+        if (role.light === "brake") mesh.setColorAt(vc[c.kind], lights.brake ? BRAKE_ON : BRAKE_OFF);
+        else if (role.light) mesh.setColorAt(vc[c.kind], blink && lights.indicator === (role.light === "left" ? -1 : 1) ? AMBER_ON : AMBER_OFF);
+        // Each car keeps one paint colour: chosen by its place in the fleet, not its draw slot.
+        else mesh.setColorAt(vc[c.kind], PAINTS[(i * 7919) % PAINTS.length]);
+      });
       vc[c.kind]++;
     });
     this.vMeshes.forEach((parts, i) => {
