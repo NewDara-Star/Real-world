@@ -93,15 +93,30 @@ Shot numbers are `game/shots/<run>/NNN` (kept on the Mac, not committed).
   (`models.ts:15`); no light pools on the road (item 16, not built). Also:
   fully dark already at 18:58 (tragedy-medium/004; Dublin sunset ~19:00),
   and lit windows are flat cream rectangles.
-- **Happy at medium** hit pedestrians again: at the business park exit
-  (happy-medium/003) and the Jamestown Road roundabout (happy-medium/009);
-  reproducible (happy/004 earlier). It waited at one red on Saint Margaret's
-  Road for 90 s and more (happy-medium/025-030): one of the 6-7 minute
-  signal cycles? Tragedy gridlocked on Melville Road again
-  (tragedy-medium/016-028), collecting kerb and footpath faults at 0 km/h.
+- **Autodrive and people: fixed in the driver, one race left in the walkers.**
+  The autodrive only asked "is anyone on the crossing of the link I'm about
+  to enter?", so it drove into people anywhere else (business-park exits,
+  mid-turn). It now stops for anyone in or heading into its path (obstacle
+  stop, `autodrive.ts`; test `autodrive-people.test.mts` reproduces the hit).
+  In the app: 0 hits in 5 happy runs (before: 2 of 2 within 45 s). Left for
+  `trafficnet.ts`: walkers waiting at the kerb judge a car that's just moving
+  off as no threat (`gapAt` only counts closing speed or < 5 m), step out as
+  it enters, and the examiner marks "Failed to yield to a pedestrian on the
+  crossing" (2 of 3 app runs). Walkers should treat a car stopped or moving
+  off near their crossing as a threat until it has passed or clearly waits.
+- **Happy at medium** hit pedestrians at the business-park exit
+  (happy-medium/003) and the Jamestown Road roundabout (happy-medium/009),
+  as in happy/004: fixed by the autodrive obstacle stop above; the five
+  checking runs (shots/fix1-5) left the business park every time and two of
+  them went through that roundabout (fix4, fix5), with no hits. Still open:
+  it waited at one red on Saint Margaret's Road for 90 s and more
+  (happy-medium/025-030), one of the 6-7 minute signal cycles? Tragedy
+  gridlocked on Melville Road again (tragedy-medium/016-028), collecting
+  kerb and footpath faults at 0 km/h.
 - **Happy driver:** stopped at red lights (happy/005-006, 016-018), no
-  signalling faults. But it hit a pedestrian crossing at the Jamestown
-  Business Park exit (G3, between happy/003 and 004), had a G2 "no left mirror
+  signalling faults. It hit a pedestrian crossing at the Jamestown
+  Business Park exit (G3, between happy/003 and 004; fixed, see the
+  obstacle-stop item above), had a G2 "no left mirror
   check" turning left on red-to-green (happy/015), and sat at 0 km/h behind a
   stopped car for the last 75 s (happy/026-030; a red traffic car is angled
   across the centre line in happy/027-030).

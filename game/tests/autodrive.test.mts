@@ -61,7 +61,7 @@ function sim(mode: AutoMode, seconds: number, seed = SEED) {
       }
     }
     // Standing still needs a reason: a light, a queue, giving way, someone crossing, arriving.
-    if (Math.abs(vf) < 0.3 && t > 5 && !/^(red light|amber|car in front|giving way|give way|someone crossing|stop sign|arriving|parked|turning in the road|stopping to turn)/.test(ad.status)) {
+    if (Math.abs(vf) < 0.3 && t > 5 && !/^(red light|amber|car in front|giving way|give way|someone crossing|someone in the road|stop sign|arriving|parked|turning in the road|stopping to turn)/.test(ad.status)) {
       idle += dt;
       idleWhy.add(ad.status.replace(/ · .*/, ""));
     }

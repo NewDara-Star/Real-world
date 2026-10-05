@@ -77,6 +77,16 @@ const PROFILES: Record<AutoMode, Profile> = {
 };
 
 const WHEELBASE = 2.55;
+/** People in the path: half the car's width (0.88 m) plus a margin either side. */
+const PED_CORRIDOR = 1.6;
+/** Someone on a footpath counts only when they're this close to the path (stepped off the kerb), m. */
+const PED_KERB = 1.1;
+/** How far ahead in time a crossing walker's straight-line path is checked, s. */
+const PED_LOOKAHEAD = 3;
+/** Stop this far short of where the person will be (car front plus a buffer), m. */
+const PED_GAP = 3.5;
+/** Braking it allows for a person, m/s² (firm; full pedal is about 8). */
+const PED_BRAKE = 6;
 
 export class AutoDriver {
   /** One line: what it's doing and why (shown on screen). */
@@ -104,6 +114,7 @@ export class AutoDriver {
   /** Per-junction decisions (ignore the light? the give-way?), rolled once per approach. */
   private decided = new Map<number, { signal: boolean; giveWay: boolean; stopDone: boolean; mirrored: boolean }>();
   private leaders = new Map<unknown, { x: number; z: number }>();
+  private walkers = new Map<unknown, { x: number; z: number }>();
   private stoppedT = 0;
   private blockedT = 0;
   private parkT = 0;
@@ -313,6 +324,38 @@ export class AutoDriver {
       need(gap - 2, vx);
     }
     for (const k of this.leaders.keys()) if (!seen.has(k)) this.leaders.delete(k);
+
+    // People in or heading into the car's path, anywhere (Autoware's obstacle
+    // stop, not just a crossing on the next junction): each walker's velocity
+    // from its last position, its place over the next few seconds predicted
+    // in a straight line, and a stop short of the first predicted point inside
+    // the corridor the car will sweep. Hard braking is allowed: people first.
+    // Someone on a footpath stays on it (the network says so), so only where
+    // they are now counts, and only if they've stepped into the road; on a
+    // crossing or a junction's walking area they're crossing: predict. Someone
+    // waiting at the kerb to cross is treated like the footpath (drivers give
+    // way to people who have started crossing; waiting for each other deadlocks).
+    const walking = new Set<unknown>();
+    const reach = Math.max(25, (v * v) / (2 * PED_BRAKE) + 15);
+    for (const w of this.traffic?.peds ?? []) {
+      if (!w.active || w.knocked > 0 || (w.x - car.x) ** 2 + (w.z - car.z) ** 2 > 50 * 50) continue;
+      walking.add(w);
+      const prev = this.walkers.get(w);
+      this.walkers.set(w, { x: w.x, z: w.z });
+      let vx = 0, vz = 0;
+      if (prev && Math.hypot(w.x - prev.x, w.z - prev.z) < 1) [vx, vz] = [(w.x - prev.x) / Math.max(dt, 1e-3), (w.z - prev.z) / Math.max(dt, 1e-3)];
+      const crossing = w.waiting === 0 && (!!w.area || w.lane?.kind !== LaneKind.Footpath);
+      const corridor = crossing ? PED_CORRIDOR : PED_KERB;
+      for (let tau = 0; tau <= (crossing ? PED_LOOKAHEAD : 0); tau += 0.25) {
+        const on = project(nav.path, nav.pathCum, w.x + vx * tau, w.z + vz * tau, s0, s0 + reach);
+        if (!on || on.lat > corridor || on.s <= s0 + 0.5) continue;
+        const d = on.s - s0 - PED_GAP;
+        capTo(Math.sqrt(2 * PED_BRAKE * Math.max(0, d)), "someone in the road");
+        need(d);
+        break;
+      }
+    }
+    for (const k of this.walkers.keys()) if (!walking.has(k)) this.walkers.delete(k);
 
     // Junctions on the route: lights, give way, stop signs, people crossing.
     for (const { link, s } of this.links) {
