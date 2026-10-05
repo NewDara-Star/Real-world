@@ -743,7 +743,6 @@ export class NetTraffic {
       c.modeT = 1.8;
       return;
     }
-    if (c.blockedByPlayer < 3) return;
     // A waiting player is waited for (a honk at most); only a car stopped for no reason gets passed, and only after a while.
     if (this.playerWaiting || c.blockedByPlayer < (this.playerParked ? PASS_PARKED_AFTER : OVERTAKE_AFTER)) return;
     if (this.changeLane(c)) return;

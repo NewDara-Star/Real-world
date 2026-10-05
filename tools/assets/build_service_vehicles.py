@@ -190,9 +190,8 @@ def build(name, pack):
     for i, o in enumerate(by_mat.get("glass", [])):
         o.name = "Glass" if i == 0 else f"Glass{i}"
         o.data.materials[0].name = "Glass"
-    lights = []
     for o in by_mat.get("optics", []):
-        lights += split_lights(o, half_w, name)
+        split_lights(o, half_w, name)
     final = [o for o in bpy.context.scene.objects if o.type == "MESH"]
     tris = sf.triangles(final)
     lo, hi = sf.bounds(final)
