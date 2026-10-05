@@ -259,7 +259,7 @@ physics and the driver. `research/15-what-it-takes.md` is the full map.
     atlas); the rest not yet. Trees and hedges still to build: trees as a
     near model plus baked impostor cards for distance (research 22,
     `docs/blender-assets.md` §5), Irish species (ash, sycamore, cherry,
-    lime); then roof clutter (HVAC, skylights) from OSM tags on flat roofs.
+    lime), generated with ez-tree (MIT, research 22) then baked; then roof clutter (HVAC, skylights) from OSM tags on flat roofs.
     Bus built (`tools/assets/build_bus.py`, `bus_dublin_dd.glb`, ~5k
     triangles): two decks of seats behind real window openings,
     `DestinationBlind`, the car's light materials and indicator names, wheel

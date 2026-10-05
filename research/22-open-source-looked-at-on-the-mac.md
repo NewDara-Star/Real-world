@@ -63,3 +63,45 @@ eye height (OSM data frozen September 2023).
 2. **Roof clutter from OSM tags** for flat-roofed shops and the business
    park, later.
 3. Their shadows and colour are on our roadmap already (items 11-12).
+
+## The owner's links and a GitHub sweep (2026-10-05)
+
+Run on the Mac in an Electron window unless noted; licences from each
+repo's LICENSE file.
+
+- **teleoperator.mindblown.ai**: closed source (teardown in research 06).
+  Still the street-level realism bar: real car models, photographic city.
+  Its cars are real brands, which we can't ship.
+- **hanakawa-boat-game.vercel.app**: stylised and illustrative; the lesson
+  is one consistent palette and light, not a technique.
+- **noxellab/nagi-ocean-sim** (MIT, three.js WebGL2): FFT spectral ocean we
+  don't need, but its sky is a CC0 Poly Haven HDRI (Kloofendal 48d, Greg
+  Zaal and Jarod Guest) shipped as two JPEGs, a normal-range photo plus a
+  gain map, decoded to HDR in the shader, and prefiltered for rough
+  reflections. That's how to get photographic sky reflections (car paint,
+  glass, wet roads; roadmap 11) in a few MB. A photo sky has its sun baked
+  in, so it would carry clouds and reflections while our sun stays physical.
+- **dgreenheck/ez-tree** (MIT, npm `@dgreenheck/ez-tree`, eztree.dev):
+  procedural trees with an "Ash Medium" preset that looks right from the
+  ground (~20k triangles, LOD1/LOD2 built in, exportable). Our street trees
+  start here: ash, plus presets tuned towards sycamore, cherry and lime,
+  then baked to cards for distance. Check its leaf and bark textures'
+  licence before shipping them; otherwise use ambientCG CC0 sets.
+- **esc5221/drive-game** (MIT, drive-game.pages.dev): OSM-built tracks,
+  240 Hz physics with raycast suspension and Pacejka combined slip, wet
+  grip, an AudioWorklet engine. The closest project to ours for physics and
+  engine sound; opened to its menu only so far.
+- **takram-design-engineering/three-geospatial** (MIT): precomputed
+  atmospheric scattering (sky, sun, aerial perspective) with a WebGPU/TSL
+  port, and volumetric clouds. The next step for the sky, now that the sun
+  follows the real path (`sun.ts`).
+
+From the sweep, to read when their item comes up: OSM2World (MIT now; tag
+rules for street furniture, kerbs, roofs), osm2streets (Apache-2.0;
+junction and marking geometry), agargaro/octahedral-impostor and
+instanced-mesh (MIT; impostors and per-instance culling), sweriko/Horde
+(MIT; pedestrian impostors), JoltPhysics.js (MIT; vehicle benchmark),
+norio/three-gtvbao (licence "other", read it first; visibility-bitmask AO),
+ranjian0/building_tools (MIT; Blender facade modules). Avoid reading the
+code of GPL/AGPL/unlicensed ones (movsim, shapeml, Blosm, 3DStreet,
+Streetmix); their demos are fine to look at.
