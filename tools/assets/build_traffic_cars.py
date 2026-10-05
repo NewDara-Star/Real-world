@@ -22,6 +22,7 @@ from mathutils import Matrix, Vector
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_street_furniture as sf  # noqa: E402  (shared Blender helpers)
+from paintmask import paint_mask  # noqa: E402  (pure NumPy, tested in game/tests/paintmask.test.mts)
 
 # n: (pack body object, real length m, class)
 CLASSES = {
@@ -137,6 +138,35 @@ def mean_colour(mat):
     return (*[v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4 for v in rgb], 1.0)
 
 
+def neutralise_paint(mat):
+    """Turn the paint in a body texture light grey (shading kept) so the game can tint each car by
+    instance colour (paintmask.py finds the paint; trim, grilles, rubber and chrome are left alone).
+    Returns False, leaving the material "CarBody" and untinted, when there's no image or the paint
+    can't be separated."""
+    import numpy as np
+    node = next((n for n in mat.node_tree.nodes if n.type == "TEX_IMAGE"), None)
+    if not node or not node.image:
+        return False
+    img = node.image
+    w, h = img.size
+    px = np.empty(w * h * 4, dtype=np.float32)
+    img.pixels.foreach_get(px)
+    px = px.reshape(-1, 4)
+    rgb = px[:, :3]
+    paint = paint_mask(rgb)
+    if paint is None:
+        return False
+    lum = rgb @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+    ref = np.percentile(lum[paint], 90)
+    grey = np.clip(lum / max(ref, 1e-3) * 0.85, 0, 1)
+    rgb[paint] = grey[paint, None]
+    px[:, :3] = rgb
+    img.pixels.foreach_set(px.ravel())
+    img.update()
+    mat.name = "CarPaint"
+    return True
+
+
 def split_lights(optics, half_w, n):
     """The pack's one "Optics" mesh becomes the game's lights: Headlights and IndicatorFL/FR at the
     front, Brakelights, Reverselights and IndicatorRL/RR at the rear. Left = +X."""
@@ -184,7 +214,8 @@ def split_lights(optics, half_w, n):
 
 def panel_van(glass, body_mat, length):
     """Paint the glass behind the front doors (sides and back) in the body's colour."""
-    paint = sf.material("VanPanel", 0xFFFFFF, rough=0.35, metal=0.1)
+    # Named CarPaint* so the game tints it with the rest of the paint.
+    paint = sf.material("CarPaintPanel", 0xFFFFFF, rough=0.35, metal=0.1)
     paint.node_tree.nodes["Principled BSDF"].inputs["Base Color"].default_value = mean_colour(body_mat)
     glass.data.materials.append(paint)
     slot = len(glass.data.materials) - 1
@@ -225,7 +256,9 @@ def build(n, pack):
     by_mat = {o.data.materials[0].name.split("_")[0]: o for o in meshes}
     body, glass, optics = by_mat["Body"], by_mat["Glass"], by_mat["Optics"]
     body.name, glass.name = "Body", "Glass"
+    # The game tints "CarPaint" per car; a body whose paint can't be separated (black) stays "CarBody".
     body.data.materials[0].name = "CarBody"
+    painted = neutralise_paint(body.data.materials[0])
     glass.data.materials[0].name = "Glass"
     if n == 5:
         panel_van(glass, body.data.materials[0], length)
@@ -244,7 +277,7 @@ def build(n, pack):
                               export_draco_mesh_compression_enable=False, use_selection=False)
     print(f"RESULT car_traffic_{n} ({cls}): {size.x:.2f} x {size.y:.2f} x {size.z:.2f} m; tris {tris}/25000 "
           f"{'OK' if tris <= 25000 else 'OVER'}; nodes {sorted(o.name for o in objs)}; "
-          f"{os.path.getsize(path) / 1024:.0f} KB")
+          f"{os.path.getsize(path) / 1024:.0f} KB; paint {'tintable' if painted else 'fixed'}")
     sf.preview(f"car_traffic_{n}", lo, hi, view=(0.9, -1.0, 0.45))
 
 

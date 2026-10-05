@@ -8,7 +8,7 @@ import { check, done, within } from "./check";
 interface Node { name?: string; translation?: number[]; mesh?: number; children?: number[] }
 
 /** The glTF JSON chunk of a .glb in public/models. */
-function gltf(file: string): { nodes: Node[] } {
+function gltf(file: string): { nodes: Node[]; materials?: { name?: string }[] } {
   const b = readFileSync(new URL(`../public/models/${file}.glb`, import.meta.url));
   const len = b.readUInt32LE(12);
   return JSON.parse(b.subarray(20, 20 + len).toString("utf8"));
@@ -32,4 +32,9 @@ for (const f of ["car_traffic_1", "car_traffic_2", "car_traffic_3", "car_traffic
   const z = (n: string) => node(g, n)?.translation?.[2] ?? 0, x = (n: string) => node(g, n)?.translation?.[0] ?? 0;
   check(`${f}: faces +Z with its left side on +X`, z("WheelFL") > z("WheelRL") && x("WheelFL") > 0 && x("WheelFR") < 0);
 }
+// Paint the game can tint per car (trafficnet.ts PAINTS): every car but the black SUV.
+const paintOf = (f: string) => (gltf(f).materials ?? []).map((m) => m.name ?? "").filter((n) => n.startsWith("CarPaint"));
+check("cars 1-3 and the van carry tintable CarPaint", ["car_traffic_1", "car_traffic_2", "car_traffic_3", "car_traffic_5"].every((f) => paintOf(f).includes("CarPaint")));
+check("the van's painted-over panels are paint too, so they take the same colour", paintOf("car_traffic_5").includes("CarPaintPanel"));
+check("the black SUV keeps its own paint (it can't be told from its black trim)", paintOf("car_traffic_4").length === 0);
 done();

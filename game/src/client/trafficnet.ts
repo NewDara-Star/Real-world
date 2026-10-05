@@ -114,6 +114,17 @@ const KINDS = [
   { tpl: () => van(0xeeeeee), model: "car_traffic_5", len: 5.0, w: 1.9, n: 6 },
   { tpl: () => bus(), model: "bus_dublin_dd", len: 10.8, w: 2.5, n: 2 },
 ];
+/**
+ * Paint colours for the traffic models' CarPaint parts, repeated to set their
+ * share. The weights are a guess, not measured: greys and silvers, black,
+ * white and blues most, a few reds and greens, the order Irish and European
+ * colour lists usually give. sRGB hex; THREE.Color converts to the linear
+ * instance colour.
+ */
+const PAINTS = [
+  0x8e9296, 0x8e9296, 0x6d7174, 0x6d7174, 0xb9bdc0, 0xb9bdc0, 0x16181b, 0x16181b, 0x16181b,
+  0xeeeeec, 0xeeeeec, 0xeeeeec, 0x1d3557, 0x2f4f7a, 0x7d1f1f, 0xa32626, 0x2c4a37, 0x5b4636,
+].map((h) => new THREE.Color(h));
 /** The Dublin model file for each vehicle kind, in kind order (for loadVehicleModels). */
 export const VEHICLE_MODELS = KINDS.map((k) => k.model);
 const SHIRTS = [0x2b2d42, 0x1f9d55, 0x9a3b3b, 0x2a62a8, 0x6b6b6b, 0xd9d4c7, 0x3d2b4f, 0x8a6a3a];
@@ -891,6 +902,8 @@ export class NetTraffic {
         const m = o as THREE.Mesh;
         if (!m.isMesh) return;
         const part = new THREE.InstancedMesh(m.geometry.clone().applyMatrix4(m.matrixWorld), m.material, n);
+        // Paint takes each car's own colour; glass, lights, trim and wheels don't.
+        if ((m.material as THREE.Material).name.startsWith("CarPaint")) part.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3).fill(1), 3);
         part.count = 0;
         part.frustumCulled = false;
         part.castShadow = true;
@@ -920,18 +933,23 @@ export class NetTraffic {
 
   private render(dt: number) {
     const vc = this.vMeshes.map(() => 0);
-    for (const c of this.cars) {
-      if (!c.active) continue;
+    this.cars.forEach((c, i) => {
+      if (!c.active) return;
       const parts = this.vMeshes[c.kind];
-      if (vc[c.kind] >= parts[0].instanceMatrix.count) continue;
+      if (vc[c.kind] >= parts[0].instanceMatrix.count) return;
       this.m.compose(this.p3.set(c.x, 0.03, c.z), this.q.setFromAxisAngle(this.up, c.yaw), this.one);
-      for (const mesh of parts) mesh.setMatrixAt(vc[c.kind], this.m);
+      for (const mesh of parts) {
+        mesh.setMatrixAt(vc[c.kind], this.m);
+        // Each car keeps one colour: chosen by its place in the fleet, not its draw slot.
+        if (mesh.instanceColor) mesh.setColorAt(vc[c.kind], PAINTS[(i * 7919) % PAINTS.length]);
+      }
       vc[c.kind]++;
-    }
+    });
     this.vMeshes.forEach((parts, i) => {
       for (const mesh of parts) {
         mesh.count = vc[i];
         mesh.instanceMatrix.needsUpdate = true;
+        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
       }
     });
     if (this.crowd) {

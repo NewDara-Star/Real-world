@@ -13,7 +13,7 @@ const before = Array.from({ length: kinds }, (_, k) => traffic.vehicleParts(k)[0
 /** A stand-in model: a body and a wheel as two meshes. */
 function model() {
   const g = new THREE.Group();
-  g.add(new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.4, 4.3), new THREE.MeshStandardMaterial()));
+  g.add(new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.4, 4.3), new THREE.MeshStandardMaterial({ name: "CarPaint" })));
   const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.2), new THREE.MeshStandardMaterial());
   wheel.position.set(0.8, 0.3, 1.3);
   g.add(wheel);
@@ -35,6 +35,7 @@ check("a model's parts keep their place on the car (the wheel's offset is in its
   a[1].geometry.computeBoundingBox();
   return Math.abs(a[1].geometry.boundingBox!.getCenter(new THREE.Vector3()).z - 1.3) < 1e-6;
 })());
+check("only the paint gets per-car colours (body yes, wheel no)", !!a[0].instanceColor && !a[1].instanceColor);
 check("the replaced boxes are gone from the scene", before.filter((_, k) => k !== 0 && k !== 2).every((m) => !traffic.group.children.includes(m)));
 
 // A full fleet for a minute: every part of a kind drawn the same number of times, at the same places.
@@ -55,8 +56,32 @@ for (let k = 0; k < kinds; k++) {
   }
 }
 const active = traffic.cars.filter((c) => c.active).length;
+
+// Each car keeps one colour while others come and go and its draw slot moves:
+// the slot is the count of active cars of its kind before it in the fleet.
+const painted = traffic.vehicleParts(1)[0];
+const colourOf = new Map<number, string>();
+let moved = 0, changed = 0;
+const lastSlot = new Map<number, number>();
+const c = new THREE.Color();
+for (let f = 0; f < 90 * 30; f++) {
+  traffic.update(1 / 30, 0, 0);
+  if (f % 15) continue;
+  let slot = 0;
+  traffic.cars.forEach((car, i) => {
+    if (!car.active || car.kind !== 1) return;
+    painted.getColorAt(slot, c);
+    const key = c.getHexString();
+    if (colourOf.has(i) && colourOf.get(i) !== key) changed++;
+    colourOf.set(i, key);
+    if (lastSlot.has(i) && lastSlot.get(i) !== slot) moved++;
+    lastSlot.set(i, slot);
+    slot++;
+  });
+}
 check("every active car is drawn once", drawn === active && active > 20, `${drawn} drawn, ${active} active`);
 check("all parts of a kind draw the same number of cars", partsAgree);
 check("no kind draws more cars than it has room for", withinBudget);
 check("a car's parts are drawn at the same place", sameMatrices);
+check("each car keeps its colour as cars come and go (its draw slot moved " + moved + " times)", moved > 0 && changed === 0, `${changed} changes over ${colourOf.size} cars`);
 done();

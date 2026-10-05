@@ -266,8 +266,8 @@ physics and the driver. `research/15-what-it-takes.md` is the full map.
     pivots at their centres. Traffic cars built too (`car_traffic_1-5.glb`,
     `tools/assets/build_traffic_cars.py`, ~7k triangles each). Dublin traffic now
     draws the cars and the bus (`setVehicleModels`), and Dublin's signals
-    are the Irish pole and head models (`RoadSigns.useModels`). Next: per-car
-    paint colours (all show the pack's yellow/gold/teal/black), working
+    are the Irish pole and head models (`RoadSigns.useModels`). Each car has its own
+    paint (greys, silver, black, white, blues, a few reds; the SUV stays black). Next: working
     brake lights and indicators on the models, turning wheels. Shopping list for the
     owner's Sketchfab downloads: a real compact-SUV base (the pack's SUV is a
     big American type, scaled down). The cars came from a CC-BY base (owner's decision 2026-10-05:
