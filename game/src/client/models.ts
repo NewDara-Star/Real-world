@@ -86,3 +86,19 @@ export async function loadStreetModels(base = "/models/"): Promise<StreetModels 
     return null;
   }
 }
+
+/**
+ * Load vehicle models by file name (trafficnet.ts VEHICLE_MODELS: one per
+ * traffic kind), each the glTF scene, front +Z on the ground, origin midway
+ * between the axles. A file that won't load comes back null (that kind keeps
+ * its box); a file named twice loads once.
+ */
+export async function loadVehicleModels(files: string[], base = "/models/"): Promise<(THREE.Object3D | null)[]> {
+  const loader = new GLTFLoader();
+  const cache = new Map<string, Promise<THREE.Object3D | null>>();
+  const load = (f: string) => {
+    if (!cache.has(f)) cache.set(f, loader.loadAsync(`${base}${f}.glb`).then((g) => g.scene, () => null));
+    return cache.get(f)!;
+  };
+  return Promise.all(files.map(load));
+}

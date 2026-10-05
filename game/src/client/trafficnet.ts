@@ -103,16 +103,19 @@ function bus() {
   ]);
 }
 
+/** Vehicle kinds: the box drawn until a model loads, the Dublin model that replaces it (public/models), size and share of the fleet. */
 const KINDS = [
-  { tpl: () => carTemplate(0xf2f2f2), len: 4.3, w: 1.8, n: 10 },
-  { tpl: () => carTemplate(0x1f3b73), len: 4.3, w: 1.8, n: 8 },
-  { tpl: () => carTemplate(0x8b1e1e), len: 4.3, w: 1.8, n: 6 },
-  { tpl: () => carTemplate(0x2d2d2d), len: 4.3, w: 1.8, n: 9 },
-  { tpl: () => carTemplate(0x9aa3ab), len: 4.3, w: 1.8, n: 9 },
-  { tpl: () => carTemplate(0x3d6b47), len: 4.3, w: 1.8, n: 4 },
-  { tpl: () => van(0xeeeeee), len: 5.0, w: 1.9, n: 6 },
-  { tpl: () => bus(), len: 10.8, w: 2.5, n: 2 },
+  { tpl: () => carTemplate(0xf2f2f2), model: "car_traffic_1", len: 4.3, w: 1.8, n: 10 },
+  { tpl: () => carTemplate(0x1f3b73), model: "car_traffic_2", len: 4.3, w: 1.8, n: 8 },
+  { tpl: () => carTemplate(0x8b1e1e), model: "car_traffic_3", len: 4.3, w: 1.8, n: 6 },
+  { tpl: () => carTemplate(0x2d2d2d), model: "car_traffic_4", len: 4.3, w: 1.8, n: 9 },
+  { tpl: () => carTemplate(0x9aa3ab), model: "car_traffic_1", len: 4.3, w: 1.8, n: 9 },
+  { tpl: () => carTemplate(0x3d6b47), model: "car_traffic_2", len: 4.3, w: 1.8, n: 4 },
+  { tpl: () => van(0xeeeeee), model: "car_traffic_5", len: 5.0, w: 1.9, n: 6 },
+  { tpl: () => bus(), model: "bus_dublin_dd", len: 10.8, w: 2.5, n: 2 },
 ];
+/** The Dublin model file for each vehicle kind, in kind order (for loadVehicleModels). */
+export const VEHICLE_MODELS = KINDS.map((k) => k.model);
 const SHIRTS = [0x2b2d42, 0x1f9d55, 0x9a3b3b, 0x2a62a8, 0x6b6b6b, 0xd9d4c7, 0x3d2b4f, 0x8a6a3a];
 
 const SIM_RADIUS = 420;
@@ -127,7 +130,8 @@ export class NetTraffic {
   time = 0;
   cars: Car[] = [];
   peds: Ped[] = [];
-  private vMeshes: THREE.InstancedMesh[] = [];
+  /** Per vehicle kind, the instanced meshes drawn at every car of that kind: a box, or each part of its model. */
+  private vMeshes: THREE.InstancedMesh[][] = [];
   private wMeshes: THREE.InstancedMesh[] = [];
   /** Human-looking pedestrians once their models have loaded; until then (or if they can't), simple walkers. */
   private crowd: Crowd | null = null;
@@ -172,7 +176,7 @@ export class NetTraffic {
       mesh.count = 0;
       mesh.frustumCulled = false;
       mesh.castShadow = true;
-      this.vMeshes.push(mesh);
+      this.vMeshes.push([mesh]);
       this.group.add(mesh);
       for (let i = 0; i < n; i++) this.cars.push(this.blankCar(kind));
     });
@@ -872,6 +876,41 @@ export class NetTraffic {
 
   // ----------------------------------------------------------- render --
 
+  /**
+   * Swap the box vehicles for real models (models.ts loadVehicleModels): each
+   * kind's box becomes one instanced mesh per part of its model (body, glass,
+   * lights, wheels), all drawn at that kind's cars. A null keeps the box.
+   */
+  setVehicleModels(models: (THREE.Object3D | null)[]) {
+    models.forEach((scene, kind) => {
+      if (!scene || !this.vMeshes[kind]) return;
+      const n = this.vMeshes[kind][0].instanceMatrix.count;
+      const parts: THREE.InstancedMesh[] = [];
+      scene.updateMatrixWorld(true);
+      scene.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh) return;
+        const part = new THREE.InstancedMesh(m.geometry.clone().applyMatrix4(m.matrixWorld), m.material, n);
+        part.count = 0;
+        part.frustumCulled = false;
+        part.castShadow = true;
+        parts.push(part);
+        this.group.add(part);
+      });
+      if (!parts.length) return;
+      for (const old of this.vMeshes[kind]) {
+        this.group.remove(old);
+        old.dispose();
+      }
+      this.vMeshes[kind] = parts;
+    });
+  }
+
+  /** The instanced meshes drawing one vehicle kind (tests and debugging). */
+  vehicleParts(kind: number): readonly THREE.InstancedMesh[] {
+    return this.vMeshes[kind] ?? [];
+  }
+
   /** Swap the simple walkers for real people (crowd.ts). */
   setCrowd(crowd: Crowd) {
     this.crowd = crowd;
@@ -883,14 +922,17 @@ export class NetTraffic {
     const vc = this.vMeshes.map(() => 0);
     for (const c of this.cars) {
       if (!c.active) continue;
-      const mesh = this.vMeshes[c.kind];
-      if (vc[c.kind] >= mesh.instanceMatrix.count) continue;
+      const parts = this.vMeshes[c.kind];
+      if (vc[c.kind] >= parts[0].instanceMatrix.count) continue;
       this.m.compose(this.p3.set(c.x, 0.03, c.z), this.q.setFromAxisAngle(this.up, c.yaw), this.one);
-      mesh.setMatrixAt(vc[c.kind]++, this.m);
+      for (const mesh of parts) mesh.setMatrixAt(vc[c.kind], this.m);
+      vc[c.kind]++;
     }
-    this.vMeshes.forEach((mesh, i) => {
-      mesh.count = vc[i];
-      mesh.instanceMatrix.needsUpdate = true;
+    this.vMeshes.forEach((parts, i) => {
+      for (const mesh of parts) {
+        mesh.count = vc[i];
+        mesh.instanceMatrix.needsUpdate = true;
+      }
     });
     if (this.crowd) {
       const list = this.crowdPeds;

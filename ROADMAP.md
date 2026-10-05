@@ -264,8 +264,10 @@ physics and the driver. `research/15-what-it-takes.md` is the full map.
     triangles): two decks of seats behind real window openings,
     `DestinationBlind`, the car's light materials and indicator names, wheel
     pivots at their centres. Traffic cars built too (`car_traffic_1-5.glb`,
-    `tools/assets/build_traffic_cars.py`, ~7k triangles each). Neither used by
-    the traffic yet (still boxes): wiring them in is next. Shopping list for the
+    `tools/assets/build_traffic_cars.py`, ~7k triangles each). Dublin traffic now
+    draws the cars and the bus (`setVehicleModels`). Next: per-car
+    paint colours (all show the pack's yellow/gold/teal/black), working
+    brake lights and indicators on the models, turning wheels. Shopping list for the
     owner's Sketchfab downloads: a real compact-SUV base (the pack's SUV is a
     big American type, scaled down). The cars came from a CC-BY base (owner's decision 2026-10-05:
     vehicles may start from CC-BY or CC0 models, reworked in Blender and

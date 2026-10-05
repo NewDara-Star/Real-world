@@ -8,8 +8,9 @@ import { Avatar } from "./avatar";
 import { Input } from "./input";
 import { Net } from "./net";
 import { Traffic } from "./traffic";
-import { NetTraffic } from "./trafficnet";
+import { NetTraffic, VEHICLE_MODELS } from "./trafficnet";
 import { Crowd } from "./crowd";
+import { loadVehicleModels } from "./models";
 import { RoadSigns } from "./roadsigns";
 import { ALLOW_CAR, ALLOW_SERVICE, LaneKind } from "./roadnet";
 import { Examiner, type Fault } from "./rules";
@@ -266,6 +267,8 @@ world
       void Crowd.load(ZONE, walkers).then((crowd) => {
         if (crowd && traffic === t) t.setCrowd(crowd);
       });
+      // Real vehicles (Dublin's cars, van and bus) replace the boxes the same way.
+      if (CITY.style === "dublin") void loadVehicleModels(VEHICLE_MODELS).then((models) => traffic === t && t.setVehicleModels(models));
     }
     if (DEBUG) Object.assign(window, { __traffic: traffic });
     if (DEBUG) setTimeout(() => Object.assign(window, { __nav: navigator_ }), 0);
